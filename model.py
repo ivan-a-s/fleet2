@@ -19,7 +19,6 @@ import numpy as np
 import copy
 import scipy.stats as stats
 import fastsim as fsim
-import t3co
 from pprint import pprint
 
 # Running parameters
