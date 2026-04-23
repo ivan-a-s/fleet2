@@ -23,6 +23,7 @@ from pprint import pprint
 
 # Running parameters
 from data import *
+from fuel_consumption import veh, cyc
 N_RUNS = 1
 
 
@@ -101,25 +102,10 @@ class Vehicles:
 
         # Calculate energy and fuel consumption for each drive cycle and energy pathway.
         self.accessory_load = self.accessory_demand # SORT
-        self.calculate_fuel_consumption()
+        sim = fsim.SimDrive(veh, cyc)
+        sim.walk()
+        res = sim.to_pydict()
 
-    #     x = self.hdt_sim()
-
-    #     # Activity
-    #     # self.range
-    
-    # # def 
-    
-    # def hdt_sim(self):
-    #     # In FASTSim 3, you access Vehicle and Cycle directly from the main module
-    #     veh = fsim.Vehicle.from_resource("2021_Class8_Diesel_Truck.csv")
-    #     cyc = fsim.Cycle.from_resource("heavy_duty_drive_cycle.csv")
-        
-    #     # Use walk() instead of sim_drive() for the FASTSim 3 Rust engine
-    #     sim = fsim.SimDrive(veh, cyc)
-    #     sim.walk() 
-        
-        # return sim.mpgge
 
     def calculate_fuel_consumption(self):
         # Energy consumption
