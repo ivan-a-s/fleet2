@@ -1,8 +1,11 @@
-""" Calculate fuel consumption for a vehicle object. """
+""" Calculate fuel consumption for a vehicle object.
+To do: deal with peak efficiency peoperly.
+"""
 import fastsim as fsim
 import json
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from scipy.stats import qmc
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
@@ -19,9 +22,12 @@ DRIVE_CYCLES = {
     'short_haul': load_drive_cycle('drive_cycles/short_haul.json'),
     'regional_haul': load_drive_cycle('drive_cycles/regional_haul.json'),
     'long_haul': load_drive_cycle('drive_cycles/long_haul.json'),
+    'udds_hdt': load_drive_cycle('drive_cycles/udds_hdt.json'),
+    'cruise_hdt': load_drive_cycle('drive_cycles/cruise_hdt.json'),
 }
 
 # Create the vehicle.
+MAX_ENGINE_POWER = 500
 VEHICLES = {
     'dice': { # Adapted Line Haul Conv.
         "name": "hdt_diesel",
@@ -45,6 +51,10 @@ VEHICLES = {
             'Conv': {
                 'alt_eff': 1.0,
                 'fc': {
+                    'pwr_idle_fuel_watts': 0.0,
+                    'pwr_out_max_init_watts': 100e3,
+                    'pwr_out_max_watts': 500e3,
+                    'pwr_ramp_lag_seconds': 1.0,
                     'eff_interp_from_pwr_out': {
                         'data': {
                             'grid': [
@@ -63,18 +73,14 @@ VEHICLES = {
                         'extrapolate': 'Error',
                         'strategy': 'Linear'
                     },
-                    'pwr_idle_fuel_watts': 0.0,
-                    'pwr_out_max_init_watts': 0.25e6,
-                    'pwr_out_max_watts': 1e6,
-                    'pwr_ramp_lag_seconds': 1.0,
                 },
-                'fs': { # Fuel capacity and supply rate limits.
-                    'energy_capacity_joules': 2.5e10,
-                    'pwr_out_max_watts': 5e6,
+                'fs': {
+                    'energy_capacity_joules': 500 * 35.8e6,
+                    'pwr_out_max_watts': 1_000e3,
                     'pwr_ramp_lag_seconds': 1.0,
                 },
                 'transmission': { # Transmission efficiency.
-                    'eff_interp': 0.875,
+                    'eff_interp': 0.95,
                 },
             },
         },
@@ -100,8 +106,8 @@ VEHICLES = {
         'pt_type': {
             'HEV': {
                 'res': {
-                    'pwr_out_max_watts': 200e3,
-                    'energy_capacity_joules': 180e6,
+                    'pwr_out_max_watts': 500e3,
+                    'energy_capacity_joules': 3.6e6 * 50,
                     'eff_interp': {
                         'Constant': 0.9848857801796105
                     },
@@ -109,14 +115,15 @@ VEHICLES = {
                     'max_soc': 0.9,
                 },
                 'fs': {
-                    'pwr_out_max_watts': 5e6,
+                    'pwr_out_max_watts': 1_000e3,
                     'pwr_ramp_lag_seconds': 1.0,
                     'energy_capacity_joules': 2.5e10,
                 },
                 'fc': {
-                    'pwr_out_max_watts': 1_000e3,
+                    'pwr_out_max_watts': 500e3,
                     'pwr_out_max_init_watts': 25e3,
                     'pwr_ramp_lag_seconds': 1.0,
+                    'pwr_idle_fuel_watts': 0.0,
                     'eff_interp_from_pwr_out': {
                         'data': {
                             'grid': [{
@@ -133,7 +140,6 @@ VEHICLES = {
                         'strategy': 'Linear',
                         'extrapolate': 'Error'
                     },
-                    'pwr_idle_fuel_watts': 0.0,
                 },
                 'em': {
                     'eff_interp_achieved': {
@@ -152,23 +158,7 @@ VEHICLES = {
                         'strategy': 'Linear',
                         'extrapolate': 'Error'
                     },
-                    'eff_interp_at_max_input': {
-                        'data': {
-                            'grid': [{
-                                'v': 1,
-                                'dim': [11],
-                                'data': [0.0, 0.0232558, 0.045454545, 0.066667, 0.08791, 0.108695, 0.212765, 0.421052, 0.631578, 0.851063, 1.075268]
-                            }],
-                            'values': {
-                                'v': 1,
-                                'dim': [11],
-                                'data': [0.86, 0.86, 0.88, 0.9, 0.91, 0.92, 0.94, 0.95, 0.95, 0.94, 0.93]
-                            }
-                        },
-                        'strategy': 'Linear',
-                        'extrapolate': 'Error'
-                    },
-                    'pwr_out_max_watts': 1_000e3,
+                    'pwr_out_max_watts': 500e3,
                 },
                 'transmission': {
                     'eff_interp': 0.98,
@@ -195,7 +185,7 @@ VEHICLES = {
         'doc': 'Generated by cal_and_val.tests.test_f2_to_f3.test_f2_to_f3',
         'year': 2022,
         'mass_kilograms': 30_000,
-        'pwr_aux_base_watts': 3_000.0,
+        'pwr_aux_base_watts': 1_000.0,
         'chassis': {
             'cg_height_meters': 1.3, # Centre of gravity
             'drag_coef': 0.55,
@@ -211,8 +201,8 @@ VEHICLES = {
         },
         'pt_type': {
             'BEV': {
-                'res': {
-                    'pwr_out_max_watts': 1000e3,
+                'res': { # Battery
+                    'pwr_out_max_watts': 500e3,
                     'energy_capacity_joules': 10*3.6e9,
                     'eff_interp': {
                         'Constant': 0.9848857801796105
@@ -220,7 +210,8 @@ VEHICLES = {
                     'min_soc': 0.05,
                     'max_soc': 0.98,
                 },
-                'em': {
+                'em': { # Electric machine (motor)
+                    'pwr_out_max_watts': 500e3,
                     'eff_interp_achieved': {
                         'data': {
                             'grid': [{
@@ -237,23 +228,6 @@ VEHICLES = {
                         'strategy': 'Linear',
                         'extrapolate': 'Error'
                     },
-                    'eff_interp_at_max_input': {
-                        'data': {
-                            'grid': [{
-                                'v': 1,
-                                'dim': [11],
-                                'data': [0.0, 0.023255813953488372, 0.045454545454545456, 0.06666666666666667, 0.0879120879120879, 0.10869565217391304, 0.2127659574468085, 0.4210526315789474, 0.631578947368421, 0.851063829787234, 1.075268817204301]
-                            }],
-                            'values': {
-                                'v': 1,
-                                'dim': [11],
-                                'data': [0.84, 0.86, 0.88, 0.9, 0.91, 0.92, 0.9400000000000001, 0.95, 0.95, 0.9400000000000001, 0.93]
-                            }
-                        },
-                        'strategy': 'Linear',
-                        'extrapolate': 'Error'
-                    },
-                    'pwr_out_max_watts': 1000e3,
                 },
                 'transmission': {
                     'eff_interp': 0.98,
@@ -261,6 +235,419 @@ VEHICLES = {
             }
         },
     },
+    'phe_parallel': {
+        'name': '2016 BMW i3 REx PHEV',
+        'year': 2025,
+        'mass_kilograms': 30_000,
+        'pwr_aux_base_watts': 3_000.0,
+        'chassis': {
+            'cg_height_meters': 1.3,
+            'drag_coef': 0.55,
+            'drive_axle_weight_frac': 0.59,
+            'drive_type': 'RWD',
+            'frontal_area_square_meters': 9.2,
+            'num_wheels': 18,
+            'wheel_base_meters': 2.7536,
+            'wheel_fric_coef': 0.7,
+            'wheel_inertia_kilogram_square_meters': 2.0,
+            'wheel_radius_meters': 0.5,
+            'wheel_rr_coef': 0.007
+        },
+        'pt_type': {
+            'PHEV': {
+                'aux_cntrl': 'AuxOnResPriority',
+                'em': {
+                    'pwr_out_max_watts': 50e3,
+                    'eff_interp_achieved': {
+                        'data': {
+                            'grid': [{
+                                'data': [0.0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0],
+                                'dim': [11],
+                                'v': 1
+                            }],
+                            'values': {
+                                'data': [0.86, 0.86, 0.88, 0.9, 0.91, 0.92, 0.94, 0.95, 0.95, 0.94, 0.93],
+                                'dim': [11],
+                                'v': 1
+                            }},
+                        'extrapolate': 'Error',
+                        'strategy': 'Linear'},
+                },
+                'fc': {
+                    'pwr_idle_fuel_watts': 0.0,
+                    'pwr_out_max_init_watts': 0.25e6,
+                    'pwr_out_max_watts': 500e3,
+                    'pwr_ramp_lag_seconds': 1.0,
+                    'eff_interp_from_pwr_out': {
+                        'data': {
+                            'grid': [{
+                                'data': [0.0, 0.005, 0.015, 0.04, 0.06, 0.1, 0.14, 0.2, 0.4, 0.6, 0.8, 1.0],
+                                'dim': [12],
+                                'v': 1
+                            }],
+                            'values': {
+                                'data': [0.1, 0.12, 0.28, 0.35, 0.375, 0.39, 0.4, 0.4, 0.38, 0.37, 0.36, 0.35],
+                                'dim': [12],
+                                'v': 1
+                            }
+                        },
+                        'extrapolate': 'Error',
+                        'strategy': 'Linear'
+                    },
+                },
+                'fs': { # Fuel capacity and supply rate limits.
+                    'energy_capacity_joules': 2.5e10,
+                    'pwr_out_max_watts': 5e6,
+                    'pwr_ramp_lag_seconds': 1.0,
+                },
+                'res': {
+                    'eff_interp': {
+                        'Constant': 0.9848857801796105
+                    },
+                    'energy_capacity_joules': 100 * 3.6e6,
+                    'max_soc': 0.9,
+                    'min_soc': 0.2,
+                    'pwr_out_max_watts': 50e3,
+                },
+                'pt_cntrl': {
+                    'RGWDB': {
+                        'fc_min_time_on_seconds': 5.0,
+                        'frac_of_most_eff_pwr_to_run_fc': 1.0,
+                        'frac_pwr_demand_fc_forced_on': 0.7894736842105263,
+                        'speed_fc_forced_on_meters_per_second': 37.9984,
+                        'speed_soc_disch_buffer_coeff': 1.0,
+                        'speed_soc_disch_buffer_meters_per_second': 22.352,
+                        'speed_soc_fc_on_buffer_coeff': 1.0,
+                        'speed_soc_fc_on_buffer_meters_per_second': 26.8224,
+                        'speed_soc_regen_buffer_coeff': 1.0,
+                        'speed_soc_regen_buffer_meters_per_second': 13.4112,
+                    }
+                },
+                'transmission': {
+                    'eff_interp': 0.98,
+                },
+                'sim_params': {
+                    'balance_soc': False,
+                    'res_per_fuel_lim': 0.005,
+                    'save_soc_bal_iters': False,
+                    'soc_balance_iter_err': 5
+                },
+                'soc_bal_iters': 0,
+            }
+        },
+    },
+    'phe_series': {
+        'name': '2016 BMW i3 REx PHEV',
+        'year': 2025,
+        'mass_kilograms': 30_000,
+        'pwr_aux_base_watts': 3_000.0,
+        'chassis': {
+            'cg_height_meters': 1.3,
+            'drag_coef': 0.55,
+            'drive_axle_weight_frac': 0.59,
+            'drive_type': 'RWD',
+            'frontal_area_square_meters': 9.2,
+            'num_wheels': 18,
+            'wheel_base_meters': 2.7536,
+            'wheel_fric_coef': 0.7,
+            'wheel_inertia_kilogram_square_meters': 2.0,
+            'wheel_radius_meters': 0.5,
+            'wheel_rr_coef': 0.007
+        },
+        'pt_type': {
+            'PHEV': {
+                'aux_cntrl': 'AuxOnResPriority',
+                'em': {
+                    'pwr_out_max_watts': 500e3,
+                    'eff_interp_achieved': {
+                        'data': {
+                            'grid': [{
+                                'data': [0.0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0],
+                                'dim': [11],
+                                'v': 1
+                            }],
+                            'values': {
+                                'data': [0.86, 0.86, 0.88, 0.9, 0.91, 0.92, 0.94, 0.95, 0.95, 0.94, 0.93],
+                                'dim': [11],
+                                'v': 1
+                            }},
+                        'extrapolate': 'Error',
+                        'strategy': 'Linear'},
+                },
+                'fc': {
+                    'pwr_idle_fuel_watts': 0.0,
+                    'pwr_out_max_init_watts': 0.25e6,
+                    'pwr_out_max_watts': 100e3,
+                    'pwr_ramp_lag_seconds': 1.0,
+                    'eff_interp_from_pwr_out': {
+                        'data': {
+                            'grid': [{
+                                'data': [0.0, 0.005, 0.015, 0.04, 0.06, 0.1, 0.14, 0.2, 0.4, 0.6, 0.8, 1.0],
+                                'dim': [12],
+                                'v': 1
+                            }],
+                            'values': {
+                                'data': [0.1, 0.12, 0.28, 0.35, 0.375, 0.39, 0.4, 0.4, 0.38, 0.37, 0.36, 0.35],
+                                'dim': [12],
+                                'v': 1
+                            }
+                        },
+                        'extrapolate': 'Error',
+                        'strategy': 'Linear'
+                    },
+                },
+                'fs': { # Fuel capacity and supply rate limits.
+                    'energy_capacity_joules': 2.5e10,
+                    'pwr_out_max_watts': 5e6,
+                    'pwr_ramp_lag_seconds': 1.0,
+                },
+                'res': {
+                    'eff_interp': {
+                        'Constant': 0.9848857801796105
+                    },
+                    'energy_capacity_joules': 100 * 3.6e6,
+                    'max_soc': 0.9,
+                    'min_soc': 0.2,
+                    'pwr_out_max_watts': 400e3,
+                },
+                'pt_cntrl': {
+                    'RGWDB': {
+                        'fc_min_time_on_seconds': 5.0,
+                        'frac_of_most_eff_pwr_to_run_fc': 1.0,
+                        'frac_pwr_demand_fc_forced_on': 0.7894736842105263,
+                        'speed_fc_forced_on_meters_per_second': 37.9984,
+                        'speed_soc_disch_buffer_coeff': 1.0,
+                        'speed_soc_disch_buffer_meters_per_second': 22.352,
+                        'speed_soc_fc_on_buffer_coeff': 1.0,
+                        'speed_soc_fc_on_buffer_meters_per_second': 26.8224,
+                        'speed_soc_regen_buffer_coeff': 1.0,
+                        'speed_soc_regen_buffer_meters_per_second': 13.4112,
+                    }
+                },
+                'transmission': {
+                    'eff_interp': 0.98,
+                },
+                'sim_params': {
+                    'balance_soc': False,
+                    'res_per_fuel_lim': 0.005,
+                    'save_soc_bal_iters': False,
+                    'soc_balance_iter_err': 5
+                },
+                'soc_bal_iters': 0,
+            }
+        },
+    },
+    'he_parallel': { # Adapted Toyota Mirai
+        'name': 'hdt_fc',
+        'year': 2025,
+        'mass_kilograms': 30_000,
+        'pwr_aux_base_watts': 3_000.0,
+        'chassis': {
+            'cg_height_meters': 1.3, # Centre of gravity
+            'drag_coef': 0.55,
+            'drive_axle_weight_frac': 0.59,
+            'drive_type': 'RWD',
+            'frontal_area_square_meters': 9.2,
+            'num_wheels': 18,
+            'wheel_base_meters': 2.7536,
+            'wheel_fric_coef': 0.7,
+            'wheel_inertia_kilogram_square_meters': 2.0,
+            'wheel_radius_meters': 0.5,
+            'wheel_rr_coef': 0.007
+        },
+        'pt_type': {
+            'HEV': {
+                'res': {
+                    'pwr_out_max_watts': 500e3,
+                    'energy_capacity_joules': 3.6e6 * 50,
+                    'eff_interp': {
+                        'Constant': 0.9848857801796105
+                    },
+                    'min_soc': 0.2,
+                    'max_soc': 0.9,
+                },
+                'fs': {
+                    'pwr_out_max_watts': 1_000e3,
+                    'pwr_ramp_lag_seconds': 1.0,
+                    'energy_capacity_joules': 2.5e10,
+                },
+                'fc': {
+                    'pwr_idle_fuel_watts': 0.0,
+                    'pwr_out_max_init_watts': 100e3,
+                    'pwr_out_max_watts': 500e3,
+                    'pwr_ramp_lag_seconds': 1.0,
+                    'eff_interp_from_pwr_out': {
+                        'data': {
+                            'grid': [
+                                {
+                                    'data': [0.0, 0.005, 0.015, 0.04, 0.06, 0.1, 0.14, 0.2, 0.4, 0.6, 0.8, 1.0],
+                                    'dim': [12],
+                                    'v': 1
+                                }
+                            ],
+                            'values': {
+                                'data': [0.10, 0.14, 0.20, 0.26, 0.32, 0.39, 0.41, 0.42, 0.41, 0.38, 0.36, 0.34],
+                                'dim': [12],
+                                'v': 1
+                            }
+                        },
+                        'extrapolate': 'Error',
+                        'strategy': 'Linear'
+                    },
+                },
+                'em': {
+                    'eff_interp_achieved': {
+                        'data': {
+                            'grid': [{
+                                'v': 1,
+                                'dim': [11],
+                                'data': [0.0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0]
+                            }],
+                            'values': {
+                                'v': 1,
+                                'dim': [11],
+                                'data': [0.86, 0.86, 0.88, 0.9, 0.91, 0.92, 0.94, 0.95, 0.95, 0.94, 0.93]
+                            }
+                        },
+                        'strategy': 'Linear',
+                        'extrapolate': 'Error'
+                    },
+                    'pwr_out_max_watts': 500e3,
+                },
+                'transmission': {
+                    'eff_interp': 0.98,
+                },
+                'pt_cntrl': {
+                    'RGWDB': {
+                        'speed_soc_disch_buffer_meters_per_second': 22.352,
+                        'speed_soc_disch_buffer_coeff': 1.0,
+                        'speed_soc_fc_on_buffer_meters_per_second': 26.8224,
+                        'speed_soc_fc_on_buffer_coeff': 1.0,
+                        'speed_soc_regen_buffer_meters_per_second': 13.4112,
+                        'speed_soc_regen_buffer_coeff': 1.0,
+                        'fc_min_time_on_seconds': 5.0,
+                        'speed_fc_forced_on_meters_per_second': 13.4112,
+                        'frac_pwr_demand_fc_forced_on': 0.6802721088435374,
+                        'frac_of_most_eff_pwr_to_run_fc': 1.0,
+                    }
+                },
+            }
+        },
+    },
+    # {
+    #     'name': '2016 KIA Optima Hybrid',
+    #     'year': 2016,
+    #     'mass_kilograms': 30_000,
+    #     'pwr_aux_base_watts': 3000.0,
+    #     'chassis': {
+    #         'cg_height_meters': 1.3, # Centre of gravity
+    #         'drag_coef': 0.55,
+    #         'drive_axle_weight_frac': 0.59,
+    #         'drive_type': 'RWD',
+    #         'frontal_area_square_meters': 9.2,
+    #         'num_wheels': 18,
+    #         'wheel_base_meters': 2.7536,
+    #         'wheel_fric_coef': 0.7,
+    #         'wheel_inertia_kilogram_square_meters': 2.0,
+    #         'wheel_radius_meters': 0.5,
+    #         'wheel_rr_coef': 0.007
+    #     },
+    #     'pt_type': {
+    #         'HEV': {
+    #             'aux_cntrl': 'AuxOnResPriority',
+    #             'em': { # Motor
+    #                 'pwr_out_max_watts': 50e3,
+    #                 'eff_interp_achieved': {
+    #                     'data': {
+    #                         'grid': [{
+    #                             'data': [0.0,0.02,0.04,0.06,0.08,0.1,0.2,0.4,0.6,0.8,1.0],
+    #                             'dim': [11],
+    #                             'v': 1}],
+    #                         'values': {
+    #                             'data': [0.44518518518518513,
+    #                                 0.44518518518518513,
+    #                                 0.4829629629629629,
+    #                                 0.5385185185185185,
+    #                                 0.5781481481481481,
+    #                                 0.6237037037037036,
+    #                                 0.8274074074074074,
+    #                                 0.9322222222222223,
+    #                                 0.9381481481481482,
+    #                                 0.9340740740740741,
+    #                                 0.924074074074074],
+    #                             'dim': [11],
+    #                             'v': 1}
+    #                         },
+    #                     'extrapolate': 'Error',
+    #                     'strategy': 'Linear'
+    #                 },
+    #             },
+    #             'fc': {
+    #                 'pwr_idle_fuel_watts': 0.0,
+    #                 'pwr_out_max_init_watts': 25e3,
+    #                 'pwr_out_max_watts': 600e3,
+    #                 'pwr_ramp_lag_seconds': 1.0,
+    #                 'eff_interp_from_pwr_out': {
+    #                     'data': {
+    #                         'grid': [
+    #                             {
+    #                                 'data': [0.0, 0.005, 0.015, 0.04, 0.06, 0.1, 0.14, 0.2, 0.4, 0.6, 0.8, 1.0],
+    #                                 'dim': [12],
+    #                                 'v': 1
+    #                             }
+    #                         ],
+    #                         'values': {
+    #                             'data': [0.10, 0.14, 0.20, 0.26, 0.32, 0.39, 0.41, 0.42, 0.41, 0.38, 0.36, 0.34],
+    #                             'dim': [12],
+    #                             'v': 1
+    #                         }
+    #                     },
+    #                     'extrapolate': 'Error',
+    #                     'strategy': 'Linear'
+    #                 },
+    #             },
+    #             'fs': {
+    #                 'energy_capacity_joules': 500 * 35.8e6,
+    #                 'pwr_out_max_watts': 1_000e3,
+    #                 'pwr_ramp_lag_seconds': 1.0,
+    #             },
+    #             'res': {
+    #                 'pwr_out_max_watts': 1000e3,
+    #                 'energy_capacity_joules': 3.6e6 * 1000,
+    #                 'eff_interp': {
+    #                     'Constant': 0.9848857801796105
+    #                 },
+    #                 'min_soc': 0.2,
+    #                 'max_soc': 0.9,
+    #             },
+    #             'pt_cntrl': {
+    #                 'RGWDB': {
+    #                     'speed_soc_disch_buffer_meters_per_second': 22.352,
+    #                     'speed_soc_disch_buffer_coeff': 1.0,
+    #                     'speed_soc_fc_on_buffer_meters_per_second': 15,
+    #                     'speed_soc_fc_on_buffer_coeff': 1.0,
+    #                     'speed_soc_regen_buffer_meters_per_second': 13.4112,
+    #                     'speed_soc_regen_buffer_coeff': 1.0,
+    #                     'fc_min_time_on_seconds': 60,
+    #                     'speed_fc_forced_on_meters_per_second': 5,
+    #                     'frac_pwr_demand_fc_forced_on': 0.3,
+    #                     'frac_of_most_eff_pwr_to_run_fc': 1.0,
+    #                 }
+    #             },
+    #             'sim_params': {
+    #                 'balance_soc': True,
+    #                 'res_per_fuel_lim': 0.005,
+    #                 'save_soc_bal_iters': False,
+    #                 'soc_balance_iter_err': 5
+    #             },
+    #             'soc_bal_iter_history': [],
+    #             'soc_bal_iters': 0,
+    #             'transmission': {
+    #                 'eff_interp': 0.95,
+    #             }
+    #         }
+    #     },
+    # }
 }
 
 def calculate_fuel_consumption(
@@ -283,6 +670,17 @@ def calculate_fuel_consumption(
         scaled_eff_data = [val * peak_eff/max(eff_data) for val in eff_data]
         veh_dict['pt_type']['Conv']['fc']['eff_interp_from_pwr_out']['data']['values']['data'] = scaled_eff_data
         veh_dict['pt_type']['Conv']['fs']['energy_capacity_joules'] = fuel_capacity * fuel_lhv
+    if veh_type == 'he_parallel':
+        veh_dict = VEHICLES['he_parallel']
+        # Scale efficiency
+        eff_data = veh_dict['pt_type']['HEV']['fc']['eff_interp_from_pwr_out']['data']['values']['data']
+        scaled_eff_data = [val * peak_eff/max(eff_data) for val in eff_data]
+        veh_dict['pt_type']['HEV']['fc']['eff_interp_from_pwr_out']['data']['values']['data'] = scaled_eff_data
+        veh_dict['pt_type']['HEV']['fs']['energy_capacity_joules'] = fuel_capacity * fuel_lhv
+    if veh_type == 'phe_parallel':
+        veh_dict = VEHICLES['phe_parallel']
+    if veh_type == 'phe_series':
+        veh_dict = VEHICLES['phe_series']
     if veh_type == 'fc':
         veh_dict = VEHICLES['fc']
         # Scale efficiency
@@ -290,7 +688,13 @@ def calculate_fuel_consumption(
         scaled_eff_data = [val * peak_eff/max(eff_data) for val in eff_data]
         veh_dict['pt_type']['HEV']['fc']['eff_interp_from_pwr_out']['data']['values']['data'] = scaled_eff_data
         veh_dict['pt_type']['HEV']['fs']['energy_capacity_joules'] = fuel_capacity * fuel_lhv
-    
+    if veh_type == 'be':
+        veh_dict = VEHICLES['be']
+        eff_data = veh_dict['pt_type']['BEV']['em']['eff_interp_achieved']['data']['values']['data']
+        scaled_eff_data = [val * peak_eff/max(eff_data) for val in eff_data]
+        veh_dict['pt_type']['BEV']['em']['eff_interp_achieved']['data']['values']['data'] = scaled_eff_data
+        veh_dict['pt_type']['BEV']['res']['energy_capacity_joules'] = fuel_capacity * fuel_lhv * 100
+
     # Replace values
     veh_dict['mass_kilograms'] = mass
     veh_dict['pwr_aux_base_watts'] = accessory_load
@@ -306,11 +710,22 @@ def calculate_fuel_consumption(
 
     # Calculate fuel consumption
     dist_km = res['veh']['state']['dist_meters'] / 1000
+    fuel_consumption = {}
     if veh_type == 'dice':
-        fuel_J = res['veh']['pt_type']['Conv']['fc']['state']['energy_fuel_joules']
+        fuel_consumption['Diesel'] = res['veh']['pt_type']['Conv']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
+    if veh_type == 'he_parallel':
+        fuel_consumption['Diesel'] = res['veh']['pt_type']['HEV']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
+    if veh_type == 'phe_parallel':
+        fuel_consumption['Diesel'] = res['veh']['pt_type']['PHEV']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
+        fuel_consumption['Electricity'] = res['veh']['pt_type']['PHEV']['res']['state']['energy_out_chemical_joules'] / 3.6e6 / dist_km
+    if veh_type == 'phe_series':
+        fuel_consumption['Diesel'] = res['veh']['pt_type']['PHEV']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
+        fuel_consumption['Electricity'] = res['veh']['pt_type']['PHEV']['res']['state']['energy_out_chemical_joules'] / 3.6e6 / dist_km
     if veh_type == 'fc':
-        fuel_J = res['veh']['pt_type']['HEV']['fc']['state']['energy_fuel_joules']
-    return (fuel_J / fuel_lhv) / dist_km * 100
+        fuel_consumption['Hydrogen'] = res['veh']['pt_type']['HEV']['fc']['state']['energy_fuel_joules'] / 120e6 / dist_km
+    if veh_type == 'be':
+        fuel_consumption['Electricity'] = res['veh']['pt_type']['BEV']['res']['state']['energy_out_electrical_joules'] / 35.8e6 / dist_km
+    return fuel_consumption
 
 def analyze_test_scheme(scheme_name, n_train=500, n_test=50):
     scheme = SCHEMES[scheme_name]
@@ -382,7 +797,6 @@ def print_results(results):
 
     print(coef_df.to_string(index=False))
 
-
 SCHEMES = {
     'sleeper_dice': {
         'ranges': {
@@ -417,23 +831,121 @@ SCHEMES = {
             'veh_type': 'fc',
             'cyc': DRIVE_CYCLES['long_haul'],
         }
-    }
+    },
+    'sleeper_be': {
+        'ranges': {
+            'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
+            'drag_coef': (0.2, 0.7),           # dimensionless
+            'peak_eff': (0.4, 0.8),             # decimal
+            'accessory_load': (1_000, 7_000),   # Watts
+        },
+        'fixed': {
+            'roll_coef': 0.0054,        # dimensionless (standard vs low-rolling)
+            'frontal_area': 9.2,        # m^2 (captures different trailer heights)
+            'regen_eff': 0,                     # Fixed for 'dice' (Conventional Diesel)
+            'fuel_capacity': 1000,               # Liters
+            'fuel_lhv': 3.6e6,                 # J/L (Diesel)
+            'veh_type': 'be',
+            'cyc': DRIVE_CYCLES['long_haul'],
+        }
+    },
+    'sleeper_phe_parallel': {
+        'ranges': {
+            'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
+            'drag_coef': (0.2, 0.7),           # dimensionless
+            'peak_eff': (0.3, 0.6),             # decimal
+            'accessory_load': (1_000, 7_000),   # Watts
+        },
+        'fixed': {
+            'roll_coef': 0.0054,        # dimensionless (standard vs low-rolling)
+            'frontal_area': 9.2,        # m^2 (captures different trailer heights)
+            'regen_eff': 0,                     # Fixed for 'dice' (Conventional Diesel)
+            'fuel_capacity': 1000,               # Liters
+            'fuel_lhv': 3.6e6,                 # J/L (Diesel)
+            'veh_type': 'phe_series',
+            'cyc': DRIVE_CYCLES['long_haul'],
+        }
+    },
+    'sleeper_phe_series': {
+        'ranges': {
+            'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
+            'drag_coef': (0.2, 0.7),           # dimensionless
+            'peak_eff': (0.3, 0.6),             # decimal
+            'accessory_load': (1_000, 7_000),   # Watts
+        },
+        'fixed': {
+            'roll_coef': 0.0054,        # dimensionless (standard vs low-rolling)
+            'frontal_area': 9.2,        # m^2 (captures different trailer heights)
+            'regen_eff': 0,                     # Fixed for 'dice' (Conventional Diesel)
+            'fuel_capacity': 1000,               # Liters
+            'fuel_lhv': 3.6e6,                 # J/L (Diesel)
+            'veh_type': 'phe_series',
+            'cyc': DRIVE_CYCLES['long_haul'],
+        }
+    },
+    'sleeper_he_parallel': {
+        'ranges': {
+            'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
+            'drag_coef': (0.2, 0.7),           # dimensionless
+            'peak_eff': (0.4, 0.8),             # decimal
+            'accessory_load': (1_000, 7_000),   # Watts
+        },
+        'fixed': {
+            'roll_coef': 0.0054,        # dimensionless (standard vs low-rolling)
+            'frontal_area': 9.2,        # m^2 (captures different trailer heights)
+            'regen_eff': 0,                     # Fixed for 'dice' (Conventional Diesel)
+            'fuel_capacity': 1000,               # Liters
+            'fuel_lhv': 3.6e6,                 # J/L (Diesel)
+            'veh_type': 'phe_series',
+            'cyc': DRIVE_CYCLES['long_haul'],
+        }
+    },
 }
 
 
 if __name__ == '__main__':
     # Execution and Reporting
-    # results = analyze_test_scheme('sleeper_fc', n_train=20, n_test=10)
+    # results = analyze_test_scheme('sleeper_be', n_train=20, n_test=10)
     # print_results(results)
 
-    # Fuel cell
+    # Test vehicles
+    # cyc = fsim.Cycle.from_resource('hwfet.csv')
+    # cyc = fsim.Cycle.from_resource('udds.csv')
+    # cyc = DRIVE_CYCLES['short_haul']
+    # cyc = DRIVE_CYCLES['long_haul']
+    cyc = DRIVE_CYCLES['udds_hdt']
+    # cyc = DRIVE_CYCLES['cruise_hdt']
+
+    # DICE
+    veh = fsim.Vehicle.from_pydict(VEHICLES['dice'])
+    fuel_consumption = calculate_fuel_consumption(accessory_load=3_000, mass=30_000, peak_eff=0.45, fuel_capacity=500, fuel_lhv=35.8e6, veh_type='dice', cyc=cyc)
+    print(fuel_consumption)
+    
+    # BE
     veh = fsim.Vehicle.from_pydict(VEHICLES['be'])
-    cyc = DRIVE_CYCLES['long_haul']
-    cyc = fsim.Cycle.from_resource('hwfet.csv')
+    fuel_consumption = calculate_fuel_consumption(accessory_load=6_000, mass=35_000, peak_eff=0.9, fuel_capacity=1000, fuel_lhv=3.6e6, veh_type='be', cyc=cyc)
+    print(fuel_consumption)
+    
+    # FC
+    fuel_consumption = calculate_fuel_consumption(accessory_load=3_000, mass=30_000, peak_eff=0.6, fuel_capacity=80, fuel_lhv=120e6, veh_type='fc', cyc=cyc)
+    print(fuel_consumption)
+    
+
+    # PHE-Parallel
+    fuel_consumption = calculate_fuel_consumption(accessory_load=3_000, mass=30_000, peak_eff=0.45, fuel_capacity=500, fuel_lhv=35.8e6, veh_type='phe_parallel', cyc=cyc)
+    print(fuel_consumption)
+
+    # PHE-Series
+    fuel_consumption = calculate_fuel_consumption(accessory_load=3_000, mass=30_000, peak_eff=0.45, fuel_capacity=500, fuel_lhv=35.8e6, veh_type='phe_series', cyc=cyc)
+    print(fuel_consumption)
+
+    # HE-Parallel
+    veh = fsim.Vehicle.from_pydict(VEHICLES['he_parallel'])
     sim = fsim.SimDrive(veh, cyc)
     sim.walk()
     res = sim.to_pydict()
-    dist_km = res['veh']['state']['dist_meters'] / 1000
-    fuel = res['veh']['pt_type']['BEV']['res']['state']['energy_out_electrical_joules'] / 3.6e6
-    print(f'Fuel consumption: {fuel/dist_km:.2f} units/km')
-    # print(calculate_fuel_consumption(peak_eff=0.6, fuel_capacity=80, fuel_lhv=120e6, veh_type='fc'))
+    fuel_consumption = calculate_fuel_consumption(accessory_load=3_000, mass=30_000, peak_eff=0.45, fuel_capacity=500, fuel_lhv=35.8e6, veh_type='he_parallel', cyc=cyc)
+    print(fuel_consumption)
+
+    # Plot
+    plt.plot(cyc.to_pydict()['speed_meters_per_second'])
