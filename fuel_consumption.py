@@ -53,7 +53,7 @@ VEHICLES = {
                 'fc': {
                     'pwr_idle_fuel_watts': 0.0,
                     'pwr_out_max_init_watts': 100e3,
-                    'pwr_out_max_watts': 500e3,
+                    'pwr_out_max_watts': 800e3,
                     'pwr_ramp_lag_seconds': 1.0,
                     'eff_interp_from_pwr_out': {
                         'data': {
@@ -534,120 +534,6 @@ VEHICLES = {
             }
         },
     },
-    # {
-    #     'name': '2016 KIA Optima Hybrid',
-    #     'year': 2016,
-    #     'mass_kilograms': 30_000,
-    #     'pwr_aux_base_watts': 3000.0,
-    #     'chassis': {
-    #         'cg_height_meters': 1.3, # Centre of gravity
-    #         'drag_coef': 0.55,
-    #         'drive_axle_weight_frac': 0.59,
-    #         'drive_type': 'RWD',
-    #         'frontal_area_square_meters': 9.2,
-    #         'num_wheels': 18,
-    #         'wheel_base_meters': 2.7536,
-    #         'wheel_fric_coef': 0.7,
-    #         'wheel_inertia_kilogram_square_meters': 2.0,
-    #         'wheel_radius_meters': 0.5,
-    #         'wheel_rr_coef': 0.007
-    #     },
-    #     'pt_type': {
-    #         'HEV': {
-    #             'aux_cntrl': 'AuxOnResPriority',
-    #             'em': { # Motor
-    #                 'pwr_out_max_watts': 50e3,
-    #                 'eff_interp_achieved': {
-    #                     'data': {
-    #                         'grid': [{
-    #                             'data': [0.0,0.02,0.04,0.06,0.08,0.1,0.2,0.4,0.6,0.8,1.0],
-    #                             'dim': [11],
-    #                             'v': 1}],
-    #                         'values': {
-    #                             'data': [0.44518518518518513,
-    #                                 0.44518518518518513,
-    #                                 0.4829629629629629,
-    #                                 0.5385185185185185,
-    #                                 0.5781481481481481,
-    #                                 0.6237037037037036,
-    #                                 0.8274074074074074,
-    #                                 0.9322222222222223,
-    #                                 0.9381481481481482,
-    #                                 0.9340740740740741,
-    #                                 0.924074074074074],
-    #                             'dim': [11],
-    #                             'v': 1}
-    #                         },
-    #                     'extrapolate': 'Error',
-    #                     'strategy': 'Linear'
-    #                 },
-    #             },
-    #             'fc': {
-    #                 'pwr_idle_fuel_watts': 0.0,
-    #                 'pwr_out_max_init_watts': 25e3,
-    #                 'pwr_out_max_watts': 600e3,
-    #                 'pwr_ramp_lag_seconds': 1.0,
-    #                 'eff_interp_from_pwr_out': {
-    #                     'data': {
-    #                         'grid': [
-    #                             {
-    #                                 'data': [0.0, 0.005, 0.015, 0.04, 0.06, 0.1, 0.14, 0.2, 0.4, 0.6, 0.8, 1.0],
-    #                                 'dim': [12],
-    #                                 'v': 1
-    #                             }
-    #                         ],
-    #                         'values': {
-    #                             'data': [0.10, 0.14, 0.20, 0.26, 0.32, 0.39, 0.41, 0.42, 0.41, 0.38, 0.36, 0.34],
-    #                             'dim': [12],
-    #                             'v': 1
-    #                         }
-    #                     },
-    #                     'extrapolate': 'Error',
-    #                     'strategy': 'Linear'
-    #                 },
-    #             },
-    #             'fs': {
-    #                 'energy_capacity_joules': 500 * 35.8e6,
-    #                 'pwr_out_max_watts': 1_000e3,
-    #                 'pwr_ramp_lag_seconds': 1.0,
-    #             },
-    #             'res': {
-    #                 'pwr_out_max_watts': 1000e3,
-    #                 'energy_capacity_joules': 3.6e6 * 1000,
-    #                 'eff_interp': {
-    #                     'Constant': 0.9848857801796105
-    #                 },
-    #                 'min_soc': 0.2,
-    #                 'max_soc': 0.9,
-    #             },
-    #             'pt_cntrl': {
-    #                 'RGWDB': {
-    #                     'speed_soc_disch_buffer_meters_per_second': 22.352,
-    #                     'speed_soc_disch_buffer_coeff': 1.0,
-    #                     'speed_soc_fc_on_buffer_meters_per_second': 15,
-    #                     'speed_soc_fc_on_buffer_coeff': 1.0,
-    #                     'speed_soc_regen_buffer_meters_per_second': 13.4112,
-    #                     'speed_soc_regen_buffer_coeff': 1.0,
-    #                     'fc_min_time_on_seconds': 60,
-    #                     'speed_fc_forced_on_meters_per_second': 5,
-    #                     'frac_pwr_demand_fc_forced_on': 0.3,
-    #                     'frac_of_most_eff_pwr_to_run_fc': 1.0,
-    #                 }
-    #             },
-    #             'sim_params': {
-    #                 'balance_soc': True,
-    #                 'res_per_fuel_lim': 0.005,
-    #                 'save_soc_bal_iters': False,
-    #                 'soc_balance_iter_err': 5
-    #             },
-    #             'soc_bal_iter_history': [],
-    #             'soc_bal_iters': 0,
-    #             'transmission': {
-    #                 'eff_interp': 0.95,
-    #             }
-    #         }
-    #     },
-    # }
 }
 
 def calculate_fuel_consumption(
@@ -727,34 +613,42 @@ def calculate_fuel_consumption(
         fuel_consumption['Electricity'] = res['veh']['pt_type']['BEV']['res']['state']['energy_out_electrical_joules'] / 35.8e6 / dist_km
     return fuel_consumption
 
+
 def analyze_test_scheme(scheme_name, n_train=500, n_test=50):
     scheme = SCHEMES[scheme_name]
     ranges = scheme['ranges']
     fixed = scheme['fixed']
     labels = list(ranges.keys())
     
-    # 1. LHS Sampling using (min, max)
+    # 1. LHS Sampling
     sampler = qmc.LatinHypercube(d=len(labels))
     sample_raw = sampler.random(n=n_train)
-    
-    # Scale LHS: bounds are now simply the first and second elements of the tuple
     l_bounds = [v[0] for v in ranges.values()]
     u_bounds = [v[1] for v in ranges.values()]
     X_train_raw = qmc.scale(sample_raw, l_bounds, u_bounds)
     df_train = pd.DataFrame(X_train_raw, columns=labels)
     
-    # 2. Physics-Informed Transformation: Linearize Efficiency
+    # 2. Physics-Informed Transformation
     df_train['inv_eff'] = 1 / df_train['peak_eff']
-    # We use 'inv_eff' for the regression, but 'peak_eff' for the FASTSim call
     labels_for_reg = [l for l in labels if l != 'peak_eff'] + ['inv_eff']
     
     print(f"Running {n_train} LHS iterations for {scheme_name}...")
+    
     y_train = []
     for _, row in df_train[labels].iterrows():
+        # Combine parameters and remove non-physics keys
         params = {**row.to_dict(), **fixed}
-        y_train.append(calculate_fuel_consumption(**params))
+        params.pop('fuels', None)
+        params.pop('veh_type', None)
+        
+        # Execute simulation - will crash here if physics or inputs fail
+        res_dict = calculate_fuel_consumption(**params)
+        
+        # Extract the first value from the dictionary
+        val = next(iter(res_dict.values()))
+        y_train.append(val)
     
-    # 3. Polynomial Regression (Interactions Only)
+    # 3. Polynomial Regression
     poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
     X_poly_train = poly.fit_transform(df_train[labels_for_reg])
     feature_names = poly.get_feature_names_out(labels_for_reg)
@@ -766,13 +660,19 @@ def analyze_test_scheme(scheme_name, n_train=500, n_test=50):
     val_data = []
     for _ in range(n_test):
         s = {k: np.random.uniform(v[0], v[1]) for k, v in ranges.items()}
-        actual = calculate_fuel_consumption(**{**s, **fixed})
+        v_params = {**s, **fixed}
+        v_params.pop('fuels', None)
+        v_params.pop('veh_type', None)
+        
+        actual_dict = calculate_fuel_consumption(**v_params)
+        actual_val = next(iter(actual_dict.values()))
         
         s_trans = s.copy()
         s_trans['inv_eff'] = 1 / s_trans.pop('peak_eff')
         X_val_poly = poly.transform(pd.DataFrame([s_trans]))
         pred = model.predict(X_val_poly)[0]
-        val_data.append({'actual': actual, 'pred': pred})
+        
+        val_data.append({'actual': actual_val, 'pred': pred})
     
     df_val = pd.DataFrame(val_data)
     
@@ -783,6 +683,7 @@ def analyze_test_scheme(scheme_name, n_train=500, n_test=50):
         'feature_names': feature_names,
         'intercept': model.intercept_
     }
+
 
 def print_results(results):
     print(f"\n--- Model Performance ---")
@@ -798,7 +699,7 @@ def print_results(results):
     print(coef_df.to_string(index=False))
 
 SCHEMES = {
-    'sleeper_dice': {
+    'dice': {
         'ranges': {
             'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
@@ -815,7 +716,7 @@ SCHEMES = {
             'cyc': DRIVE_CYCLES['long_haul'],
         }
     },
-    'sleeper_fc': {
+    'fc': {
         'ranges': {
             'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
@@ -832,7 +733,7 @@ SCHEMES = {
             'cyc': DRIVE_CYCLES['long_haul'],
         }
     },
-    'sleeper_be': {
+    'be': {
         'ranges': {
             'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
@@ -849,7 +750,7 @@ SCHEMES = {
             'cyc': DRIVE_CYCLES['long_haul'],
         }
     },
-    'sleeper_phe_parallel': {
+    'phe_parallel': {
         'ranges': {
             'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
@@ -866,7 +767,7 @@ SCHEMES = {
             'cyc': DRIVE_CYCLES['long_haul'],
         }
     },
-    'sleeper_phe_series': {
+    'phe_series': {
         'ranges': {
             'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
@@ -883,7 +784,7 @@ SCHEMES = {
             'cyc': DRIVE_CYCLES['long_haul'],
         }
     },
-    'sleeper_he_parallel': {
+    'he_parallel': {
         'ranges': {
             'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
@@ -905,7 +806,7 @@ SCHEMES = {
 
 if __name__ == '__main__':
     # Execution and Reporting
-    # results = analyze_test_scheme('sleeper_be', n_train=20, n_test=10)
+    results = analyze_test_scheme('dice', n_train=20, n_test=10)
     # print_results(results)
 
     # Test vehicles
@@ -914,15 +815,13 @@ if __name__ == '__main__':
     # cyc = DRIVE_CYCLES['short_haul']
     # cyc = DRIVE_CYCLES['long_haul']
     cyc = DRIVE_CYCLES['udds_hdt']
-    # cyc = DRIVE_CYCLES['cruise_hdt']
+    cyc = DRIVE_CYCLES['cruise_hdt']
 
     # DICE
-    veh = fsim.Vehicle.from_pydict(VEHICLES['dice'])
     fuel_consumption = calculate_fuel_consumption(accessory_load=3_000, mass=30_000, peak_eff=0.45, fuel_capacity=500, fuel_lhv=35.8e6, veh_type='dice', cyc=cyc)
     print(fuel_consumption)
     
     # BE
-    veh = fsim.Vehicle.from_pydict(VEHICLES['be'])
     fuel_consumption = calculate_fuel_consumption(accessory_load=6_000, mass=35_000, peak_eff=0.9, fuel_capacity=1000, fuel_lhv=3.6e6, veh_type='be', cyc=cyc)
     print(fuel_consumption)
     
