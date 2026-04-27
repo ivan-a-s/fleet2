@@ -614,8 +614,7 @@ def calculate_fuel_consumption(
     return fuel_consumption
 
 
-def analyze_test_scheme(scheme_name, n_train=500, n_test=50):
-    scheme = SCHEMES[scheme_name]
+def analyze_test_scheme(scheme, n_train=500, n_test=50):
     ranges = scheme['ranges']
     fixed = scheme['fixed']
     labels = list(ranges.keys())
@@ -632,7 +631,7 @@ def analyze_test_scheme(scheme_name, n_train=500, n_test=50):
     df_train['inv_eff'] = 1 / df_train['peak_eff']
     labels_for_reg = [l for l in labels if l != 'peak_eff'] + ['inv_eff']
     
-    print(f"Running {n_train} LHS iterations for {scheme_name}...")
+    print(f"Running {n_train} LHS iterations for {scheme['fixed']['veh_type']}...")
     
     y_train = []
     for _, row in df_train[labels].iterrows():
@@ -684,7 +683,6 @@ def analyze_test_scheme(scheme_name, n_train=500, n_test=50):
         'intercept': model.intercept_
     }
 
-
 def print_results(results):
     print(f"\n--- Model Performance ---")
     print(f"R2 Score: {results['r2']:.6f}")
@@ -697,6 +695,64 @@ def print_results(results):
     }).sort_values(by='Coefficient', ascending=False, key=abs)
 
     print(coef_df.to_string(index=False))
+
+def save_model_to_json(results, filename='model_params.json'):
+    # Extract weights from the LinearRegression object
+    model = results['model']
+    
+    # We create a dictionary of feature names and their corresponding coefficients
+    params = {
+        'features': dict(zip(results['feature_names'], model.coef_.tolist())),
+        'intercept': float(model.intercept_),
+        'r2': float(results['r2']),
+        'mape': float(results['mape'])
+    }
+    
+    with open(filename, 'w') as f:
+        json.dump(params, f, indent=4)
+    print(f"Model saved to {filename}")
+
+def load_model_dataframe(json_path='model_params.json'):
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+    
+    # Create a DataFrame where index is the feature name and column is the weight
+    df = pd.DataFrame.from_dict(data['features'], orient='index', columns=['coefficient'])
+    
+    # Store intercept as a separate attribute of the dataframe for easy access
+    df.attrs['intercept'] = data['intercept']
+    return df
+
+def estimate_fuel_consumption(input_data, model_df):
+    """
+    input_data: dict with keys ['mass', 'drag_coef', 'accessory_load', 'peak_eff']
+    model_df: the dataframe returned by load_model_dataframe
+    """
+    # 1. Prepare base features
+    # Note: We must create 'inv_eff' because the model was trained on it
+    features = {
+        'mass': input_data['mass'],
+        'drag_coef': input_data['drag_coef'],
+        'accessory_load': input_data['accessory_load'],
+        'inv_eff': 1 / input_data['peak_eff']
+    }
+    
+    # 2. Manually create interaction terms to match the feature_names in your model
+    # (Matches: 'mass drag_coef', 'mass accessory_load', etc.)
+    features['mass drag_coef'] = features['mass'] * features['drag_coef']
+    features['mass accessory_load'] = features['mass'] * features['accessory_load']
+    features['mass inv_eff'] = features['mass'] * features['inv_eff']
+    features['drag_coef accessory_load'] = features['drag_coef'] * features['accessory_load']
+    features['drag_coef inv_eff'] = features['drag_coef'] * features['inv_eff']
+    features['accessory_load inv_eff'] = features['accessory_load'] * features['inv_eff']
+    
+    # 3. Calculate: Sum(feature * coefficient) + intercept
+    total = model_df.attrs['intercept']
+    for feature_name, coef in model_df['coefficient'].items():
+        total += features[feature_name] * coef
+        
+    return total
+
 
 SCHEMES = {
     'dice': {
@@ -713,7 +769,7 @@ SCHEMES = {
             'fuel_capacity': 500,               # Liters
             'fuel_lhv': 35.8e6,                 # J/L (Diesel)
             'veh_type': 'dice',
-            'cyc': DRIVE_CYCLES['long_haul'],
+            'cyc': DRIVE_CYCLES['cruise_hdt'],
         }
     },
     'fc': {
@@ -806,8 +862,27 @@ SCHEMES = {
 
 if __name__ == '__main__':
     # Execution and Reporting
-    results = analyze_test_scheme('dice', n_train=20, n_test=10)
-    # print_results(results)
+    ps = ['dice', 'be', 'fc', 'he_parallel']
+    dc = 'cruise_hdt'
+    for p in ps:
+        fname = 'drive_cycles/' + p + '_' + dc + '.json'
+        scheme = SCHEMES[p]
+        scheme['fixed']['cyc'] = DRIVE_CYCLES[dc]
+        results = analyze_test_scheme(scheme, n_train=100, n_test=20)
+        print_results(results)
+        save_model_to_json(results, filename=fname)
+        
+        model_df = load_model_dataframe(fname)
+        my_truck = {
+            'drag_coef': 0.6,
+            'accessory_load': 3_000,
+            'mass': 30_000,
+            'peak_eff': 0.45
+        }
+        prediction = estimate_fuel_consumption(my_truck, model_df)
+        # print(f"Parameters: {my_truck}")
+        print(f"Estimated Fuel Consumption: {prediction:.4f}")
+
 
     # Test vehicles
     # cyc = fsim.Cycle.from_resource('hwfet.csv')
@@ -818,7 +893,7 @@ if __name__ == '__main__':
     cyc = DRIVE_CYCLES['cruise_hdt']
 
     # DICE
-    fuel_consumption = calculate_fuel_consumption(accessory_load=3_000, mass=30_000, peak_eff=0.45, fuel_capacity=500, fuel_lhv=35.8e6, veh_type='dice', cyc=cyc)
+    fuel_consumption = calculate_fuel_consumption(drag_coef=0.6, accessory_load=3_000, mass=30_000, peak_eff=0.45, fuel_capacity=500, fuel_lhv=35.8e6, veh_type='dice', cyc=cyc)
     print(fuel_consumption)
     
     # BE
