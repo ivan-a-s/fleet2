@@ -1,17 +1,17 @@
 {
     "features": {
-        "mass": 4.513081872537281e-08,
-        "drag_coef": -0.006879786111814489,
-        "accessory_load": 6.926757515213509e-07,
-        "inv_eff": 0.05743082888462836,
-        "mass drag_coef": 8.898061769699331e-07,
-        "mass accessory_load": -3.9725187549188856e-11,
-        "mass inv_eff": 1.2421328809399484e-06,
-        "drag_coef accessory_load": 3.8191790398154645e-06,
-        "drag_coef inv_eff": 0.05102135897257896,
-        "accessory_load inv_eff": 2.093862966427665e-06
+        "mass": 2.282955932833317e-08,
+        "drag_coef": 0.007709596120778182,
+        "accessory_load": -2.392501433011852e-07,
+        "inv_eff": 0.058676215794488715,
+        "mass drag_coef": 8.163184248888734e-07,
+        "mass accessory_load": 9.036712380112059e-12,
+        "mass inv_eff": 1.1826771856967158e-06,
+        "drag_coef accessory_load": 1.63566697352512e-06,
+        "drag_coef inv_eff": 0.04912951705162224,
+        "accessory_load inv_eff": 2.4285153426801985e-06
     },
-    "intercept": -0.010527436773538845,
-    "r2": 0.9971855785840954,
-    "mape": 0.9132561923253327
+    "intercept": -0.013450092175747275,
+    "r2": 0.998264943727873,
+    "mape": 0.8806610431832843
 }

@@ -14,6 +14,7 @@ To do:
  - Separate classes for ESS and powertrains?
  - Accessory load
  - Should roll coeff vary by number of wheels?
+ - Re-calculate mass every year?
 """
 import numpy as np
 import copy
@@ -91,39 +92,39 @@ def set_year(input_dict, year=START_YEAR, years=np.arange(START_YEAR-MAX_AGE, EN
 class Vehicles:
     def __init__(self, params, fuels, drive_cycles, p):
         # Add parameters
-        self.__dict__.update(params)
-        self.fuels = {key: fuels[key] for key in list(self.fuels)}
-        self.drive_cycles = {str(key): drive_cycles[str(key)] for key in np.unique(self.drive_cycle)}
-        # Sets
+        self.params = copy.copy(params)
+        self.fuels = {key: fuels[key] for key in list(params['fuels'])}
+        self.drive_cycles = {str(key): drive_cycles[str(key)] for key in np.unique(params['drive_cycle'])}
         self.p = p
-        self.max_age = len(self.survival_rate)
+        self.age = np.arange(self.params['max_age'], dtype=int)
+        
+        # Remove unnecessary data
         del params, fuels, drive_cycles, p
 
-        # Calculate mass
+        # Vehicle mass
         self.calculate_mass()
 
-        # Fuel consumption
-        self.fuel_consumption = {fuel: np.zeros(self.max_age) for fuel in self.fuels.keys()}
-        for fuel in self.fuels.keys():
-            for a in range(self.max_age):
-                if self.drive_cycle[a] == 'short_haul':
-                    self.fuel_consumption[fuel][a] = self.calculate_fuel_consumption2('short_haul', 0.45)
-                if self.drive_cycle[a] == 'long_haul':
-                    self.fuel_consumption[fuel][a] = self.calculate_fuel_consumption2('long_haul', 0.45)
-                else:
-                    self.fuel_consumption[fuel][a] = (self.calculate_fuel_consumption2('short_haul', 0.45) + self.calculate_fuel_consumption2('long_haul', 0.45))/2
+        # Simulate vehicle year-by-year
+        self.fuel_consumption = {fuel: np.zeros(len(self.age)) for fuel in self.fuels.keys()}
+        self.range = np.zeros(len(self.age))
+        for a in self.age:
+            # Fuel consumption
+            for f in self.fuels.keys():
+                self.fuel_consumption[f][a] = self.calculate_fuel_consumption(self.params['drive_cycle'][a], 0.45)
+            # Range and activity
+            self.range = max((self.params['fuel_capacity'][f] * self.usable_capacity[f][a]) / self.fuel_consumption[f])
 
-    def calculate_fuel_consumption2(self, drive_cycle, efficiency):
+
+    def calculate_fuel_consumption(self, drive_cycle, efficiency):
         # Load file
         path = 'drive_cycles/'+self.p+'_'+drive_cycle+'.json'
         with open(path, 'r') as f:
             model_params =  json.load(f)
-        pass
         # Features
         base = {
             'mass': self.total_mass,
-            'drag_coef': self.drag_coefficient,
-            'accessory_load': self.accessory_load,
+            'drag_coef': self.params['drag_coef'],
+            'accessory_load': self.params['accessory_load'],
             'inv_eff': 1 / efficiency,
         }
         # Estimate fuel consumption
@@ -140,11 +141,11 @@ class Vehicles:
 
     def calculate_mass(self):
         self.mass = {
-            'frame': self.frame_mass,
+            'frame': self.params['frame_mass'],
         }
-        if self.trailer_mass > 0:
-            self.mass['trailer'] = self.trailer_mass
-        for key, component in self.components.items():
+        if self.params['trailer_mass'] > 0:
+            self.mass['trailer'] = self.params['trailer_mass']
+        for key, component in self.params['components'].items():
             if component['type'] == 'converter':
                 self.mass[key] = component['mass']
             elif component['type'] == 'ess':
@@ -154,40 +155,8 @@ class Vehicles:
             else:
                 raise Exception('Unrecognised component type.')
         self.unloaded_mass = sum(v for v in self.mass.values())
-        self.payload = self.default_payload * (1 - self.p_weighed_out * (1 - (self.gvwl - self.unloaded_mass)/(self.gvwl - self.default_unloaded_mass)))
-        self.total_mass = self.unloaded_mass + self.payload
-
-    def calculate_energy_consumption(v, drive_cycle='long_haul'):
-        if drive_cycle == 'long_haul':
-            return (
-                184468.0062 +
-                v.total_mass * 65.678763 +
-                v.roll_coefficient * 0 + 
-                v.drag_coefficient * 4350611.430231 + 
-                v.regen_efficiency * -292181.3162943 +
-                v.accessory_load * 47.472692 +
-                getattr(v, "motor_size", 0) * -82.872142
-            )
-        elif drive_cycle == 'regional_haul':
-            return (
-                100174.0174 +
-                v.total_mass * 62.269866 +
-                v.roll_coefficient * 0 + 
-                v.drag_coefficient * 3771521.906184 + 
-                v.regen_efficiency * -145997.061314 +
-                v.accessory_load * 51.988641 +
-                getattr(v, "motor_size", 0) * -50.706751
-            )
-        else:
-            return (
-                31692.4468 +
-                v.total_mass * 136.098951 +
-                v.roll_coefficient * 0 + 
-                v.drag_coefficient * 3849936.569754 + 
-                v.regen_efficiency * -39075.473546 +
-                v.accessory_load * 96.047578 +
-                getattr(v, "motor_size", 0) * -10.420126
-            )
+        self.mass['payload'] = self.params['default_payload'] * (1 - self.params['p_weighed_out'] * (1 - (self.params['gvwl'] - self.unloaded_mass)/(self.params['gvwl'] - self.params['default_unloaded_mass'])))
+        self.total_mass = self.unloaded_mass + self.mass['payload']
 
 
 
@@ -215,9 +184,11 @@ class Fleet:
                 self.vehicles[k,'dice',y] = Vehicles(vehicle_params, fuel_params, drive_cycle_params, p='dice')
 
     def select_vehicle_params(self, all_vehicle_params, k, p, y):
-        # Shared, powertrain-specific, powertrain component-specific
+        # Shared for that vehicle type
         vehicle_params = all_vehicle_params['types'][k]['shared']
+        # Specific to that powertrain
         vehicle_params |= all_vehicle_params['types'][k]['powertrains'][p]
+        # Component parameters
         for key, component in list(vehicle_params['components'].items()):
             other = all_vehicle_params['components'][component['type']][key]
             component.update({k: v for k, v in other.items() if k not in component})

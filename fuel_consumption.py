@@ -26,6 +26,7 @@ DRIVE_CYCLES = {
     'udds_hdt': load_drive_cycle('drive_cycles/udds_hdt.json'),
     'cruise_hdt': load_drive_cycle('drive_cycles/cruise_hdt.json'),
     'short_haul': load_drive_cycle('drive_cycles/udds_hdt.json'),
+    'regional_haul': load_drive_cycle('drive_cycles/udds_hdt.json'),
     'long_haul': load_drive_cycle('drive_cycles/cruise_hdt.json'),
 }
 
@@ -720,7 +721,7 @@ SCHEMES = {
 
 if __name__ == '__main__':
     # Vehicles
-    ps = ['dice', 'be', 'fc', 'he_parallel']
+    ps = ['dice', 'he_parallel', 'be', 'fc']
     # ps = ['dice', 'he_parallel']
     # ps = ['dice']
     # ps = ['he_parallel']
@@ -728,7 +729,7 @@ if __name__ == '__main__':
     # Drive cycles
     dc = 'udds_hdt'
     # dcs = ['udds_hdt', 'cruise_hdt']
-    dcs = ['short_haul', 'long_haul']
+    dcs = ['short_haul', 'regional_haul', 'long_haul']
     dc = 'long_haul'
     for dc in dcs:
         for p in ps:

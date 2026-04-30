@@ -240,6 +240,7 @@ PARAMS = {
         'types': {
             'sleeper': {
                 'shared': {
+                    'max_age': 25,
                     'activity_proportion': 0.77, # maybe wrong since Sleepers don't exclusively do long-haul?
                     'default_payload': 16_000,
                     'default_unloaded_mass': 12_938,
@@ -255,7 +256,7 @@ PARAMS = {
                     ],
                     'survival_rate': np.linspace(1, 0, MAX_AGE+1)[:-1],
                     'frontal_area': 9.2, # m^2
-                    'roll_coefficient': 0.0054,
+                    'roll_coef': 0.0054,
                     'frame_mass': 6_052, # kg
                     'trailer_mass': 5_029, # kg
                     'mass_correction': 0.2,
@@ -265,7 +266,7 @@ PARAMS = {
                         '2050': {'dist': 'triangle', 'min': 0.9, 'mode': 1.7, 'max': 2.2}, # IEA SDS, IEA STEPS, IEA 40% from material efficiency.
                     },
                     'driver_cost': 0.38, # $/km
-                    'drag_coefficient': { # US DoE Targets
+                    'drag_coef': { # US DoE Targets
                         'dist': 'interp',
                         '2000': {'dist': 'const', 'val': 0.7}, # Old standard
                         '2010': {'dist': 'const', 'val': 0.6},
@@ -297,7 +298,6 @@ PARAMS = {
                                 'fuel': 'diesel',
                             },
                         },
-                        'regen_efficiency': 0,
                         'running_cost': 0.17,
                         'init_market_limit': 1.0,
                     },
