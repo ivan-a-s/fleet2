@@ -18,12 +18,11 @@ To do:
 import numpy as np
 import copy
 import scipy.stats as stats
-import fastsim as fsim
+import json
 from pprint import pprint
 
 # Running parameters
 from data import *
-from fuel_consumption import veh, cyc
 N_RUNS = 1
 
 
@@ -90,34 +89,54 @@ def set_year(input_dict, year=START_YEAR, years=np.arange(START_YEAR-MAX_AGE, EN
 
 
 class Vehicles:
-    def __init__(self, params, fuels, drive_cycles):
+    def __init__(self, params, fuels, drive_cycles, p):
         # Add parameters
         self.__dict__.update(params)
         self.fuels = {key: fuels[key] for key in list(self.fuels)}
         self.drive_cycles = {str(key): drive_cycles[str(key)] for key in np.unique(self.drive_cycle)}
-        del params, fuels, drive_cycles
+        # Sets
+        self.p = p
+        self.max_age = len(self.survival_rate)
+        del params, fuels, drive_cycles, p
 
         # Calculate mass
         self.calculate_mass()
 
-        # Calculate energy and fuel consumption for each drive cycle and energy pathway.
-        self.accessory_load = self.accessory_demand # SORT
-        sim = fsim.SimDrive(veh, cyc)
-        sim.walk()
-        res = sim.to_pydict()
-
-
-    def calculate_fuel_consumption(self):
-        # Energy consumption
-        for key, drive_cycle in list(self.drive_cycles.items()):
-            drive_cycle['energy_consumption'] = self.calculate_energy_consumption(key)
-            drive_cycle['fuel_consumption'] = {}
         # Fuel consumption
-        for path, properties in self.energy_pathways.items():
-            fuel = properties['fuel']
-            properties['efficiency'] = np.prod([self.components[component]['efficiency'] for component in path])
-            for key, drive_cycle in list(self.drive_cycles.items()):
-                drive_cycle['fuel_consumption'][fuel] = drive_cycle['energy_consumption'] / properties['efficiency'] / self.fuels[fuel]['lhv']
+        self.fuel_consumption = {fuel: np.zeros(self.max_age) for fuel in self.fuels.keys()}
+        for fuel in self.fuels.keys():
+            for a in range(self.max_age):
+                if self.drive_cycle[a] == 'short_haul':
+                    self.fuel_consumption[fuel][a] = self.calculate_fuel_consumption2('short_haul', 0.45)
+                if self.drive_cycle[a] == 'long_haul':
+                    self.fuel_consumption[fuel][a] = self.calculate_fuel_consumption2('long_haul', 0.45)
+                else:
+                    self.fuel_consumption[fuel][a] = (self.calculate_fuel_consumption2('short_haul', 0.45) + self.calculate_fuel_consumption2('long_haul', 0.45))/2
+
+    def calculate_fuel_consumption2(self, drive_cycle, efficiency):
+        # Load file
+        path = 'drive_cycles/'+self.p+'_'+drive_cycle+'.json'
+        with open(path, 'r') as f:
+            model_params =  json.load(f)
+        pass
+        # Features
+        base = {
+            'mass': self.total_mass,
+            'drag_coef': self.drag_coefficient,
+            'accessory_load': self.accessory_load,
+            'inv_eff': 1 / efficiency,
+        }
+        # Estimate fuel consumption
+        total = model_params['intercept']
+        coefs = model_params['features']
+        for name, coef in coefs.items():
+            if " " in name:
+                v1, v2 = name.split(" ")
+                total += (base[v1] * base[v2]) * coef
+            else:
+                total += base[name] * coef
+                
+        return total
 
     def calculate_mass(self):
         self.mass = {
@@ -193,7 +212,7 @@ class Fleet:
                 fuel_params = self.params['fuels']
                 drive_cycle_params = self.params['drive_cycles']
                 # Create vehicle
-                self.vehicles[k,'dice',y] = Vehicles(vehicle_params, fuel_params, drive_cycle_params)
+                self.vehicles[k,'dice',y] = Vehicles(vehicle_params, fuel_params, drive_cycle_params, p='dice')
 
     def select_vehicle_params(self, all_vehicle_params, k, p, y):
         # Shared, powertrain-specific, powertrain component-specific

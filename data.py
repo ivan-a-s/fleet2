@@ -273,7 +273,7 @@ PARAMS = {
                         '2030': {'dist': 'uniform', 'min': 0.34, 'max': 0.43}, # US DOE 2030 Target
                         '2050': {'dist': 'uniform', 'min': 0.30, 'max': 0.41}, # US DOE Ultimate Target
                     },
-                    'accessory_demand': 4_250 * 0.46,
+                    'accessory_load': 3000,
                     'p_weighed_out': 0.3,
                 },
                 'powertrains': {
