@@ -34,6 +34,11 @@ PRICE_LAMBDA = 3e-5
 
 
 PARAMS = {
+    'fleet': {
+        'autonomous_t50': 2040,
+        'initial_activity': 61_000 * 62_965 * 12.72,
+        'activity_growth': 0.02,
+    },
     'drive_cycles': {
         'long_haul': {
             'path': 'param_estimation/energy_consumption/Fleet DNA Long-Haul Representative_.csv',
@@ -170,7 +175,6 @@ PARAMS = {
             "electricity_intensity": 1.0,
         }
     },
-    'autonomous_t50': 2040,
     'vehicles': { # Need to add straight trucks and hybrids.
         'components': {
             'converter': {
@@ -291,12 +295,27 @@ PARAMS = {
                                 'type': 'transmission',
                             },
                         },
-                        'fuels': ['diesel'],
-                        'energy_pathways': {
-                            ('diesel_tank', 'ice', 'combustion_transmission'): {
-                                'energy_proportion': 1.0,
-                                'fuel': 'diesel',
+                        'fuels': {
+                            'diesel': {},
+                        },
+                        'running_cost': 0.17,
+                        'init_market_limit': 1.0,
+                    },
+                    'be': {
+                        'components':{
+                            'diesel_tank': {
+                                'type': 'ess',
+                                'capacity': 500
                             },
+                            'ice': {
+                                'type': 'converter',
+                            },
+                            'combustion_transmission': {
+                                'type': 'transmission',
+                            },
+                        },
+                        'fuels': {
+                            'fast_charge': {},
                         },
                         'running_cost': 0.17,
                         'init_market_limit': 1.0,

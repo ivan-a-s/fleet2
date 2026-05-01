@@ -90,7 +90,7 @@ def set_year(input_dict, year=START_YEAR, years=np.arange(START_YEAR-MAX_AGE, EN
 
 
 class Vehicles:
-    def __init__(self, params, fuels, drive_cycles, p):
+    def __init__(self, params, fuels, drive_cycles, p): # condense into params
         # Add parameters
         self.params = copy.copy(params)
         self.fuels = {key: fuels[key] for key in list(params['fuels'])}
@@ -110,12 +110,12 @@ class Vehicles:
         for a in self.age:
             # Fuel consumption
             for f in self.fuels.keys():
-                self.fuel_consumption[f][a] = self.calculate_fuel_consumption(self.params['drive_cycle'][a], 0.45)
+                self.fuel_consumption[f][a] = self.calculate_fuel_consumption(self.params['drive_cycle'][a])
             # Range and activity
-            self.range = max((self.params['fuel_capacity'][f] * self.usable_capacity[f][a]) / self.fuel_consumption[f])
+            # self.range = max((self.params['fuel_capacity'][f] * self.usable_capacity[f][a]) / self.fuel_consumption[f])
 
 
-    def calculate_fuel_consumption(self, drive_cycle, efficiency):
+    def calculate_fuel_consumption(self, drive_cycle):
         # Load file
         path = 'drive_cycles/'+self.p+'_'+drive_cycle+'.json'
         with open(path, 'r') as f:
@@ -125,8 +125,13 @@ class Vehicles:
             'mass': self.total_mass,
             'drag_coef': self.params['drag_coef'],
             'accessory_load': self.params['accessory_load'],
-            'inv_eff': 1 / efficiency,
         }
+        if self.p == 'dice':
+            base['inv_eff'] = 1 / self.params['components']['ice']['efficiency']
+        elif self.p == 'he_parallel':
+            base['inv_eff'] = 1 / self.params['components']['ice']['efficiency']
+        elif self.p == 'be':
+            base['inv_eff'] = 1 / self.params['components']['motor']['efficiency']
         # Estimate fuel consumption
         total = model_params['intercept']
         coefs = model_params['features']
@@ -136,7 +141,6 @@ class Vehicles:
                 total += (base[v1] * base[v2]) * coef
             else:
                 total += base[name] * coef
-                
         return total
 
     def calculate_mass(self):
@@ -161,42 +165,72 @@ class Vehicles:
 
 
 class Fleet:
-    def __init__(self, params, param_cps, start_year=START_YEAR, end_year=END_YEAR, max_age=25):
+    def __init__(self, params, param_cps, start_year=START_YEAR, end_year=END_YEAR, max_age=MAX_AGE):
         # Copy params and set uncertain inputs.
         self.params = copy.deepcopy(params)
+        self.start_year = start_year
+        self.end_year = end_year
+        self.max_age = max_age
         self.realise_uncertainties(param_cps)
         params = None
 
         # Sets
-        self.model_years = np.arange(start_year-max_age, end_year+1)
+        self.years = np.arange(self.start_year, self.end_year+1)
+        self.model_years = np.arange(self.start_year-self.max_age, self.end_year+1)
         self.vehicle_types = self.params['vehicles']['types'].keys()
+        self.powertrains = {k: list(self.params['vehicles']['types'][k]['powertrains']) for k in self.vehicle_types}
 
         # Apply policies (pyrolysis etc.)
 
+
+        # Create initial stock (all DICE)
+        self.stock = {
+            (k, p, y, t): np.float32(0)
+            for k in self.vehicle_types
+            for p in self.powertrains[k]
+            for t in self.years
+            for y in range(t - MAX_AGE + 1, t+1)
+        }
+        self.create_initial_stock()
+
+    def create_initial_stock(self):
         self.vehicles = {}
-        for y in range(start_year-max_age, start_year):
+        for y in range(self.start_year-self.max_age, self.start_year):
             for k in self.vehicle_types:
                 # Vehicle, fuel, and drive-cycle parameters
-                vehicle_params = self.select_vehicle_params(copy.deepcopy(self.params['vehicles']), k, 'dice', y)
+                vehicle_params = self.select_vehicle_params(k, 'dice', y)
                 fuel_params = self.params['fuels']
                 drive_cycle_params = self.params['drive_cycles']
                 # Create vehicle
                 self.vehicles[k,'dice',y] = Vehicles(vehicle_params, fuel_params, drive_cycle_params, p='dice')
+        # Previous stock
+        self.activity_requirement = {(k, y):
+            self.params['fleet']['initial_activity'] * (1 + self.params['fleet']['activity_growth']) ** (y-self.start_year) * self.params['vehicles']['types'][k]['shared']['activity_proportion']
+            for k in self.vehicle_types for y in self.model_years
+        }
+        for k in self.vehicle_types:
+            for y in range(self.start_year-self.max_age+1, self.start_year):
+                self.stock[k, 'dice', y, self.start_year] = self.activity_requirement[k,y] * self.vehicles[k, 'dice', y].survival_rate[START_YEAR-y] / \
+                    sum(self.vehicles[k, 'D', 2000].annual_activity[a] * self.vehicles[k, 'D', 2000].survival_rate[a] * (1+GROWTH_RATE)**(-a) for a in range(MAX_AGE))
 
-    def select_vehicle_params(self, all_vehicle_params, k, p, y):
+    def select_vehicle_params(self, k, p, y):
         # Shared for that vehicle type
-        vehicle_params = all_vehicle_params['types'][k]['shared']
+        vehicle_params = copy.deepcopy(self.params['vehicles']['types'][k]['shared'])
         # Specific to that powertrain
-        vehicle_params |= all_vehicle_params['types'][k]['powertrains'][p]
+        vehicle_params |= copy.deepcopy(self.params['vehicles']['types'][k]['powertrains'][p])
         # Component parameters
         for key, component in list(vehicle_params['components'].items()):
-            other = all_vehicle_params['components'][component['type']][key]
+            other = copy.deepcopy(self.params['vehicles']['components'][component['type']][key])
             component.update({k: v for k, v in other.items() if k not in component})
         # Set parameters using the model year
         exclude = ['target_distance', 'drive_cycle', 'survival_rate']
         for key, value in vehicle_params.items():
             if key not in exclude:
                 vehicle_params[key] = set_year(value, year=y)
+        # Add fuels and drive cycles <-------
+        for f in list(vehicle_params['fuels'].keys()):
+            vehicle_params['fuels'][f] = copy.deepcopy(self.params)
+
         return (vehicle_params)
 
     def realise_uncertainties(self, param_cps):

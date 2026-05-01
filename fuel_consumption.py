@@ -11,6 +11,7 @@ from scipy.stats import qmc
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import r2_score, mean_absolute_percentage_error
+import time
 
 # Load drive-cycle.
 def load_drive_cycle(fname="drive_cycles/regional_haul.json"):
@@ -333,7 +334,7 @@ VEHICLES = {
                     }
                 },
                 'transmission': {
-                    'eff_interp': 0.98,
+                    'eff_interp': 0.95,
                 },
                 'sim_params': {
                     'balance_soc': True,
@@ -517,7 +518,7 @@ def calculate_fuel_consumption(
     if veh_type == 'fc':
         fuel_consumption['Hydrogen'] = res['veh']['pt_type']['HEV']['fc']['state']['energy_fuel_joules'] / 120e6 / dist_km
     if veh_type == 'be':
-        fuel_consumption['Electricity'] = res['veh']['pt_type']['BEV']['res']['state']['energy_out_electrical_joules'] / 35.8e6 / dist_km
+        fuel_consumption['Electricity'] = res['veh']['pt_type']['BEV']['res']['state']['energy_out_electrical_joules'] / 3.6e6 / dist_km
     return fuel_consumption
 
 def analyze_test_scheme(scheme, n_train=500, n_test=50):
@@ -654,7 +655,7 @@ SCHEMES = {
     },
     'fc': {
         'ranges': {
-            'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
+            'mass': (6_000, 41_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
             'peak_eff': (0.4, 0.8),             # decimal
             'accessory_load': (1_000, 7_000),   # Watts
@@ -670,7 +671,7 @@ SCHEMES = {
     },
     'be': {
         'ranges': {
-            'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
+            'mass': (9_000, 44_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
             'peak_eff': (0.4, 0.8),             # decimal
             'accessory_load': (1_000, 7_000),   # Watts
@@ -686,7 +687,7 @@ SCHEMES = {
     },
     'phe_parallel': {
         'ranges': {
-            'mass': (5_000, 40_000),           # kg (extended to 45k for BC limits)
+            'mass': (7_000, 42_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
             'peak_eff': (0.3, 0.6),             # decimal
             'accessory_load': (1_000, 7_000),   # Watts
@@ -702,7 +703,7 @@ SCHEMES = {
     },
     'he_parallel': {
         'ranges': {
-            'mass': (7_000, 42_000),           # kg (extended to 45k for BC limits)
+            'mass': (5_500, 40_500),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
             'peak_eff': (0.35, 0.6),             # decimal
             'accessory_load': (1_000, 7_000),   # Watts
@@ -744,9 +745,13 @@ if __name__ == '__main__':
             my_truck = {
                 key: np.mean(val) for key, val in scheme['ranges'].items()
             }
+            t0 = time.time()
             test = estimate_fuel_consumption(my_truck, model_params)
+            t1 = time.time()
             var = list(calculate_fuel_consumption(**{**scheme['fixed'], **my_truck}).values())[0]
+            t2 = time.time()
             print(f"{p}, {dc}:\n {test:.5f}")#\n {var:.5f}")
+            print(f'model: {(t1-t0 + 1e-10)/(t2-t1 + 1e-10)}')
 
     # veh = fsim.Vehicle.from_pydict(VEHICLES[p])
     # cyc = DRIVE_CYCLES[dc]
