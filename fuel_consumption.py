@@ -1,7 +1,6 @@
 """ Calculate fuel consumption for a vehicle object.
 To do: deal with peak efficiency peoperly.
 """
-import fastsim as fsim
 import json
 import numpy as np
 import pandas as pd
@@ -245,7 +244,7 @@ VEHICLES = {
             }
         },
     },
-    'phe_parallel': {
+    'phe': {
         'name': '2016 BMW i3 REx PHEV',
         'year': 2025,
         'mass_kilograms': 30_000,
@@ -346,7 +345,7 @@ VEHICLES = {
             }
         },
     },
-    'he_parallel': { # Adapted Toyota Mirai
+    'he': { # Adapted Toyota Mirai
         'name': 'hdt_fc',
         'year': 2025,
         'mass_kilograms': 30_000,
@@ -467,13 +466,13 @@ def calculate_fuel_consumption(
         scaled_eff_data = [val * peak_eff/max(eff_data) for val in eff_data]
         veh_dict['pt_type']['Conv']['fc']['eff_interp_from_pwr_out']['data']['values']['data'] = scaled_eff_data
         veh_dict['pt_type']['Conv']['fs']['energy_capacity_joules'] = fuel_capacity * fuel_lhv
-    if veh_type == 'he_parallel':
+    if veh_type == 'he':
         # Scale efficiency
         eff_data = veh_dict['pt_type']['HEV']['fc']['eff_interp_from_pwr_out']['data']['values']['data']
         scaled_eff_data = [val * peak_eff/max(eff_data) for val in eff_data]
         veh_dict['pt_type']['HEV']['fc']['eff_interp_from_pwr_out']['data']['values']['data'] = scaled_eff_data
         veh_dict['pt_type']['HEV']['fs']['energy_capacity_joules'] = fuel_capacity * fuel_lhv
-    if veh_type == 'phe_parallel':
+    if veh_type == 'phe':
         pass
     if veh_type == 'phe_series':
         pass
@@ -507,9 +506,9 @@ def calculate_fuel_consumption(
     fuel_consumption = {}
     if veh_type == 'dice':
         fuel_consumption['Diesel'] = res['veh']['pt_type']['Conv']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
-    if veh_type == 'he_parallel':
+    if veh_type == 'he':
         fuel_consumption['Diesel'] = res['veh']['pt_type']['HEV']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
-    if veh_type == 'phe_parallel':
+    if veh_type == 'phe':
         fuel_consumption['Diesel'] = res['veh']['pt_type']['PHEV']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
         fuel_consumption['Electricity'] = res['veh']['pt_type']['PHEV']['res']['state']['energy_out_chemical_joules'] / 3.6e6 / dist_km
     if veh_type == 'phe_series':
@@ -685,7 +684,7 @@ SCHEMES = {
             'cyc': DRIVE_CYCLES['long_haul'],
         }
     },
-    'phe_parallel': {
+    'phe': {
         'ranges': {
             'mass': (7_000, 42_000),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
@@ -697,11 +696,11 @@ SCHEMES = {
             'frontal_area': 9.2,        # m^2 (captures different trailer heights)
             'fuel_capacity': 1000,               # Liters
             'fuel_lhv': 3.6e6,                 # J/L (Diesel)
-            'veh_type': 'phe_parallel',
+            'veh_type': 'phe',
             'cyc': DRIVE_CYCLES['long_haul'],
         }
     },
-    'he_parallel': {
+    'he': {
         'ranges': {
             'mass': (5_500, 40_500),           # kg (extended to 45k for BC limits)
             'drag_coef': (0.2, 0.7),           # dimensionless
@@ -713,7 +712,7 @@ SCHEMES = {
             'frontal_area': 9.2,        # m^2 (captures different trailer heights)
             'fuel_capacity': 500,               # Liters
             'fuel_lhv': 35.8e6,                 # J/L (Diesel)
-            'veh_type': 'he_parallel',
+            'veh_type': 'he',
             'cyc': DRIVE_CYCLES['cruise_hdt'],
         }
     },
@@ -722,10 +721,10 @@ SCHEMES = {
 
 if __name__ == '__main__':
     # Vehicles
-    ps = ['dice', 'he_parallel', 'be', 'fc']
-    # ps = ['dice', 'he_parallel']
+    ps = ['dice', 'he', 'be', 'fc']
+    # ps = ['dice', 'he']
     # ps = ['dice']
-    # ps = ['he_parallel']
+    # ps = ['he']
     # ps = ['be']
     # Drive cycles
     dc = 'udds_hdt'
