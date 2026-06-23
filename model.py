@@ -1,15 +1,29 @@
-""" Model cleaned up.
+"""
+Multinomial logit fleet adoption model for heavy-duty trucks (HDT) in BC, 2025–2050.
+
+Architecture
+------------
+Each Monte Carlo run draws one cumulative-probability vector (param_cps) and passes it to
+Fleet(), which realises all uncertain parameters at once so shared components (e.g. ICE
+efficiency) receive a single consistent draw.
+
+The simulation proceeds in three layers:
+  1. Vehicles  — one cohort object per (vehicle type k, powertrain p, model year y).
+                 Computes mass, fuel consumption (FASTSim polynomial surrogate), range,
+                 annual distance, emissions, capital cost, annual cost, TCO, NPV.
+  2. Fleet     — year-by-year roll-over of surviving cohorts, new vehicle creation, and
+                 market-share allocation via multinomial logit with production caps.
+  3. Aggregate — totals over the stock for fuel use, emissions, and system costs.
+
 To do:
- - Does battery degradation apply to PHEVs?
- - Does embodied battery emissions apply to PHEVs or HEVs or FCs?
  - Apply some checks (average distance, activity, etc)
- - Drivers need to be paid during breaks.
  - Market share limit inside fleet.
  - Size vehicle components for NPV optimisation?
-   - Combine with improved fuel consumption calculation.
  - Altitude on FC/engine performance and air resistance.
- - Bring the policies into something less annoying.
- - Payload by drivecycle not vehicle type
+ - Make scrappage/usage decisions for vehicles?
+
+ Checked up to:
+  - _calculate_fuel_consumption
 """
 import numpy as np
 import copy
@@ -24,7 +38,15 @@ def load_model_params(json_path):
     with open(json_path, 'r') as f:
         return json.load(f)
 
+_SURROGATES = load_model_params('vehicle_modelling/surrogates.json')
+
 def estimate_fuel_consumption(input_data, model_params):
+    """
+    Evaluate the degree-2 interaction polynomial surrogate trained by fuel_consumption.py.
+    Features are: mass, drag_coef, accessory_load, inv_eff (= 1/peak_eff) and their pairwise
+    products. Returns scalar fuel consumption in L/km, kg/km, or kWh/km depending on the
+    surrogate (the caller in _split_surrogate_output interprets the units).
+    """
     base  = {
         'mass':           input_data['mass'],
         'drag_coef':      input_data['drag_coef'],
@@ -46,27 +68,23 @@ SURROGATE_NAME = {
     'hice': 'dice',
     'dhice': 'he',
 }
-# phe surrogate only has udds_hdt/cruise_hdt files
-PHE_DC_MAP = {
-    'short_haul': 'udds_hdt', 'regional_haul': 'udds_hdt', 'long_haul': 'cruise_hdt',
-}
 # Which component efficiency to pass as peak_eff to the surrogate
 EFF_COMPONENT = {
-    'dice': 'ice', 'he': 'ice',   'phe': 'ice',
+    'dice': 'ice', 'he': 'ice',
     'be':   'motor', 'fc': 'fc',
     'hice': 'ice', 'dhice': 'ice',
 }
-ZEV_POWERTRAINS          = {'be', 'fc', 'hice'}
-HICE_POWERTRAINS         = {'hice', 'dhice'}
-AFTERTREATMENT_POWERTRAINS = {'dice', 'he', 'phe', 'dhice'}
-CHARGER_POWERTRAINS      = {'be', 'phe'}
+ZEV_POWERTRAINS     = {'be', 'fc', 'hice'}
+HICE_POWERTRAINS    = {'hice', 'dhice'}
+CHARGER_POWERTRAINS = {'be'}
 
 
 # ---------------------------------------------------------------------------
-# Helper functions (unchanged)
+# Helper functions
 # ---------------------------------------------------------------------------
 
 def get_uncertainty_distributions(d, current_path=()):
+    """Walk the nested params dict and return all leaf nodes that contain a 'dist' key."""
     paths = []
     if isinstance(d, dict):
         if 'dist' in d:
@@ -90,7 +108,14 @@ def set_param_(param, cp):
         raise ValueError(f"Unknown distribution: {param['dist']}")
 
 def set_param(param, cp=0.5, Y=np.arange(START_YEAR - MAX_AGE, END_YEAR + 1)):
-    """ Convert a cumulative probability to a realized parameter value (scalar or array over Y). """
+    """
+    Convert a cumulative probability cp ∈ [0,1] to a realised parameter value.
+    'linear'  — linearly interpolated array over Y; start and end are themselves distributions.
+    'interp'  — piecewise-linear over specified anchor years, realised at each cp.
+    Scalar distributions (const/triangle/uniform) are handled by set_param_().
+    The same cp is applied to all distribution specs in a single MC run, so correlated
+    parameters (e.g. 2025 and 2050 end-points of a cost curve) move together.
+    """
     if param['dist'] == 'linear':
         start = set_param_(param['start'], cp)
         end   = set_param_(param['end'],   cp)
@@ -114,6 +139,13 @@ def convert_to_float32(d):
     return d
 
 def set_year(input_dict, year=START_YEAR, years=np.arange(START_YEAR - MAX_AGE, END_YEAR + 1)):
+    """
+    Slice all time-varying arrays in a nested dict to the scalar value at `year`.
+    Called by select_vehicle_params() so that a Vehicles object sees scalar costs,
+    efficiencies, etc. appropriate to its model year rather than full time series.
+    Arrays covering age (target_distance, drive_cycle, survival_rate) are excluded
+    from this slicing — they vary by vehicle age, not calendar year.
+    """
     if isinstance(input_dict, np.ndarray):
         return input_dict[np.where(years == year)[0][0]]
     elif isinstance(input_dict, dict):
@@ -130,19 +162,17 @@ class Vehicles:
     """
     Represents a single vehicle cohort (vehicle type k, powertrain p, model year y).
 
-    params       — time-sliced vehicle params from Fleet.select_vehicle_params()
-    fuels        — full (unsliced) fuel params from PARAMS['fuels'], covering all Y years
-    drive_cycles — drive cycle metadata from PARAMS['drive_cycles']
-    costs        — full (unsliced) vehicle cost arrays from PARAMS['vehicles']['costs']
+    params — time-sliced vehicle params from Fleet.select_vehicle_params()
+    fuels  — full (unsliced) fuel params from PARAMS['fuels'], covering all Y years
+    costs  — full (unsliced) vehicle cost arrays from PARAMS['vehicles']['costs']
     p            — powertrain key string, e.g. 'dice', 'be', 'fc'
     k            — vehicle type key string, e.g. 'sleeper', 'day_cab', 'straight'
     """
 
-    def __init__(self, params, fuels, drive_cycles, costs, p, k):
+    def __init__(self, params, fuels, costs, p, k):
         self.params       = params
         self._all_fuels   = fuels                                    # full dict — needed for en-route fast_charge pricing
         self.fuels        = {f: fuels[f] for f in params['fuels']}
-        self.drive_cycles = drive_cycles
         self.costs        = costs
         self.p            = p
         self.k            = k
@@ -164,24 +194,35 @@ class Vehicles:
     # -- Mass ------------------------------------------------------------------
 
     def _calculate_mass(self):
-        gvwl_increase = float(self.params.get('gvwl_increase', 0)) if self.p in ZEV_POWERTRAINS else 0.0
+        # TODO: ZEVs receive a GVWL exemption under ZEV mandate policy — disabled until policies are added
+        gvwl_increase = 0.0
         self.mass = {'frame': float(self.params['frame_mass'])}
-        if float(self.params.get('trailer_mass', 0)) > 0:
+        if float(self.params['trailer_mass']) > 0:
             self.mass['trailer'] = float(self.params['trailer_mass'])
         for comp_name, comp in self.params['components'].items():
             if comp['type'] == 'converter':
                 self.mass[comp_name] = float(comp['mass'])
             elif comp['type'] == 'ess':
-                self.mass[comp_name] = float(comp.get('specific_mass', 0)) * float(comp['capacity'])
+                # ESS mass = specific_mass (kg per unit capacity) × capacity
+                self.mass[comp_name] = float(comp['specific_mass']) * float(comp['capacity'])
             elif comp['type'] == 'transmission':
                 self.mass[comp_name] = float(comp['mass'])
         self.unloaded_mass = sum(self.mass.values())
-        payload_frac = 1.0 - self.params['p_weighed_out'] * (
+
+        # Payload penalty: heavier drivetrains displace payload.
+        # payload_frac = 1 when unloaded_mass == default_unloaded_mass (no penalty).
+        # payload_frac < 1 when unloaded_mass > default, scaled by p_weighed_out
+        # (the fraction of loads that are weight-limited rather than volume-limited).
+        # The ratio (available_headroom / reference_headroom) gives the fractional
+        # payload capacity remaining after the heavier drivetrain takes up mass budget.
+        # payload_frac is a scalar — it depends only on unloaded_mass vs the reference mass budget.
+        # The per-age payload (from drive_cycles) is then scaled by this fraction.
+        payload_frac = max(0.0, 1.0 - self.params['p_weighed_out'] * (
             1.0 - (self.params['gvwl'] + gvwl_increase - self.unloaded_mass)
                 / (self.params['gvwl'] - self.params['default_unloaded_mass'])
-        )
-        self.mass['payload'] = float(self.params['default_payload']) * max(0.0, payload_frac)
-        self.total_mass = self.unloaded_mass + self.mass['payload']
+        ))
+        self.mass['payload'] = np.asarray(self.params['payload']) * payload_frac
+        self.total_mass      = self.unloaded_mass + self.mass['payload']  # age-array
 
     # -- Fuel consumption ------------------------------------------------------
 
@@ -189,15 +230,15 @@ class Vehicles:
         surrogate = SURROGATE_NAME.get(self.p, self.p)
         peak_eff  = float(self.params['components'][EFF_COMPONENT[self.p]]['efficiency'])
 
-        self.average_speed    = np.array([self.drive_cycles[dc]['average_speed']
-                                          for dc in self.params['drive_cycle']])
+        self.average_speed    = self.params['average_speed']
         self.fuel_consumption = {f: np.zeros(len(self.age)) for f in self.fuels}
 
         for dc in np.unique(self.params['drive_cycle']):
-            dc_file     = PHE_DC_MAP.get(dc, dc) if surrogate == 'phe' else dc
-            model_params = load_model_params(f'drive_cycles/{surrogate}_{dc_file}.json')
+            # Use the total mass at a representative age for this drive cycle
+            a_rep        = next(a for a in self.age if self.params['drive_cycle'][a] == dc)
+            model_params = _SURROGATES[surrogate][dc]
             raw          = estimate_fuel_consumption({
-                'mass':           self.total_mass,
+                'mass':           float(self.total_mass[a_rep]),
                 'drag_coef':      self.params['drag_coef'],
                 'accessory_load': self.params['accessory_load'],
                 'peak_eff':       peak_eff,
@@ -208,7 +249,11 @@ class Vehicles:
                 if f in self.fuel_consumption:
                     self.fuel_consumption[f][mask] = val
 
-        # Convert from ESS units/km to source (grid/pump) units/km
+        # Convert from ESS (tank/battery) units/km to source (grid/pump) units/km.
+        # The surrogate is trained on vehicle energy demand, but fuel costs and emissions
+        # are quoted per unit of delivered energy at the pump/meter.  Dividing by
+        # refuel_efficiency (e.g. 0.95 for slow AC charging, 0.86 for DC fast charging)
+        # grosses up from battery kWh to grid kWh, or from tank kg to pump kg for H2.
         for f in self.fuel_consumption:
             eff = float(self.fuels[f].get('refuel_efficiency', 1.0))
             if eff < 1.0:
@@ -216,40 +261,40 @@ class Vehicles:
 
     def _split_surrogate_output(self, raw_val):
         """
-        Map scalar surrogate output (primary fuel, L/km or kg/km or kWh/km) to a
-        per-fuel dict covering all fuels this powertrain uses.
+        Map the scalar surrogate output to a per-fuel consumption dict (L/km, kg/km, or kWh/km).
+
+        The surrogate always returns a single number representing the primary energy carrier
+        (diesel L/km for ICE/HEV, kWh/km battery for BEV, kg/km H2 for FCEV).  For
+        multi-fuel powertrains (PHE, DHICE) the total energy is split into components using
+        the fuel proportions declared in data.json, via LHV-based energy accounting.
+        These are battery-to-wheel values; the caller divides by refuel_efficiency to get
+        grid/pump values.
         """
-        DIESEL_LHV = 38_600_000.0   # J/L
-        H2_LHV    = 120_000_000.0   # J/kg
-        ELEC_LHV  = 3_600_000.0     # J/kWh
+        DIESEL_LHV = float(self._all_fuels['diesel']['lhv'])  # J/L
+        H2_LHV     = float(self._all_fuels['h2']['lhv'])      # J/kg
         fp = self.params['fuels']   # {fuel: {proportion: x}}
 
         if self.p in ('dice', 'he'):
-            # Surrogate gives net diesel L/km (regen accounted for in HEV model)
+            # Surrogate gives net diesel L/km; HEV regen already reflected in the trained model
             return {'diesel': raw_val}
-
-        elif self.p == 'phe':
-            # Surrogate (phe_parallel) gives diesel L/km; estimate electricity from proportion
-            d_prop = fp.get('diesel',      {}).get('proportion', 0.95)
-            e_prop = fp.get('fast_charge', {}).get('proportion', 0.08)
-            total  = d_prop + e_prop
-            elec_energy = raw_val * DIESEL_LHV * (e_prop / total) / (d_prop / total)
-            e_fuel = 'fast_charge' if 'fast_charge' in self.fuels else 'slow_charge'
-            return {'diesel': raw_val, e_fuel: elec_energy / ELEC_LHV}
 
         elif self.p == 'be':
             e_fuel = next(f for f in self.fuels if 'charge' in f)
             return {e_fuel: raw_val}
 
         elif self.p == 'fc':
+            # Surrogate is trained on a fuel-cell HEV model; output is H2 kg/km
             return {'h2': raw_val}
 
         elif self.p == 'hice':
-            # dice surrogate gives L/km diesel; convert to kg/km H2 via LHV
+            # Reuses the diesel ICE surrogate; output is diesel L/km which is converted to
+            # kg/km H2 via the LHV ratio (same mechanical energy, different fuel energy density)
             return {'h2': raw_val * DIESEL_LHV / H2_LHV}
 
         elif self.p == 'dhice':
-            # HEV surrogate gives diesel-equivalent L/km; split by fuel proportion
+            # Reuses the HEV surrogate (diesel L/km total); split total energy into diesel
+            # and H2 fractions using the proportions declared in data.json, then convert
+            # each fraction back to its own units via LHV
             d_prop = fp.get('diesel', {}).get('proportion', 0.75)
             h_prop = fp.get('h2',     {}).get('proportion', 0.25)
             total  = d_prop + h_prop
@@ -264,6 +309,22 @@ class Vehicles:
     # -- Range -----------------------------------------------------------------
     
     def _calculate_range(self):
+        """
+        Compute per-age range (km) as the binding energy-storage constraint across all ESS
+        components, and set self.refuel_rate for use in the daily-distance loop.
+
+        Range per ESS = capacity × usable_fraction / fuel_consumption_rate  [km]
+        where fuel_consumption is in source units/km (post efficiency correction).
+        The binding range is the minimum across all ESS (e.g. diesel tank on a DHICE).
+
+        self.refuel_rate is the effective en-route replenishment rate in the same units
+        as fc × speed (energy/hr), used in the time-budget formula in _calculate_annual_distance.
+        For H2 tanks it is the pump flow rate (kg/hr).
+        For batteries it is the fast-charger wall power × efficiency ratio:
+          refuel_rate (kW wall) × fast_eff / slow_eff
+        The slow_eff division corrects for fuel_consumption being in wall-plug slow-charge
+        basis rather than battery basis, keeping the units commensurable.
+        """
         battery_fuel = next((f for f in self.fuels if 'charge' in f), None)
         ESS_FUEL = {
             'diesel_tank': 'diesel',
@@ -284,20 +345,20 @@ class Vehicles:
             if np.all(fc == 0):
                 continue
             fc[fc == 0] = 1e-9
-            r = float(comp['capacity']) * float(comp.get('usable_capacity', 1.0)) / fc
+            r = float(comp['capacity']) * float(comp['usable_capacity']) / fc
             self.range = np.minimum(self.range, r)
             if comp_name == 'battery':
-                rate_raw = float(comp.get('charging_rate', 0))
+                # Battery refuel_rate is kW wall power; apply efficiency ratio to convert
+                # to wall-plug slow-charge basis (commensurable with fuel_consumption units)
+                rate_raw = float(comp['refuel_rate'])
                 if rate_raw > 0 and battery_fuel:
-                    # charging_rate is fast-charger wall power (kW); convert to slow_charge-basis
-                    # units so it is commensurable with fc_a (wall-plug kWh/km) × speed (km/hr)
-                    fast_eff = float(self._all_fuels.get('fast_charge', {}).get('refuel_efficiency', 1.0))
-                    slow_eff = float(self.fuels[battery_fuel].get('refuel_efficiency', 1.0))
+                    fast_eff = float(self._all_fuels['fast_charge']['refuel_efficiency'])
+                    slow_eff = float(self.fuels[battery_fuel]['refuel_efficiency'])
                     rate = rate_raw * fast_eff / slow_eff
                 else:
                     rate = 0.0
             else:
-                rate = float(comp.get('refuel_rate', 0))
+                rate = float(comp['refuel_rate'])
             if rate > self.refuel_rate:
                 self.refuel_rate = rate
 
@@ -306,7 +367,29 @@ class Vehicles:
     def _calculate_annual_distance(self):
         """
         Age-by-age loop: applies battery degradation and range-limited daily distance.
-        Ported from fleet/model.py Vehicle.calculate_annual_distance().
+
+        target_distance (km/year) is converted to a daily working-day target:
+          daily_target = annual_km / 365 × (7/5)
+        i.e., trucks are assumed to work 5 days out of 7, so each working day covers
+        more than 1/365 of the annual distance.
+
+        When daily_target ≤ range, the vehicle drives the full target.  Otherwise it
+        can extend its range with a refuelling/recharging stop using a time-budget formula:
+          achievable = (time_left - 0.25h) × speed × R / (fc × speed + R)
+        where time_left = shortfall / speed (hours that would have been spent driving),
+        0.25h is the fixed stop overhead, and R = self.refuel_rate.  This is derived by
+        solving simultaneously for stop time and extra distance given a fixed time budget.
+
+        Battery degradation follows a linear capacity-fade model:
+          effective_range[a] = range[a] × max(0, 1 − deg_per_year×a − deg_per_cycle×cycles)
+        Cycle count accumulates from annual_distance × fuel_consumption / battery_capacity.
+
+        self._enroute_distance tracks km driven via en-route fast charging (non-zero only
+        for slow-charge BETs when range < target), used in _calculate_annual_cost to apply
+        fast-charge pricing to that portion of electricity consumption.
+
+        Annual distance is converted back from working-day to calendar-year basis:
+          annual_km = daily_km × (5/7) × 365
         """
         daily_target = self.params['target_distance'] / 365.0 * 7.0 / 5.0
 
@@ -361,6 +444,11 @@ class Vehicles:
     # -- FC replacements -------------------------------------------------------
 
     def _track_fc_replacements(self):
+        """
+        Track cumulative operating hours and flag ages at which the fuel-cell stack
+        must be replaced (fc_replacements[a] = 1.0).  The stack lifetime is in hours;
+        the counter resets to zero after each replacement event.
+        """
         self.fc_replacements = np.zeros(len(self.age))
         fc_comp = self.params['components'].get('fc')
         if fc_comp is None:
@@ -376,6 +464,17 @@ class Vehicles:
     # -- Emissions -------------------------------------------------------------
 
     def _calculate_emissions(self):
+        """
+        Three emission streams:
+          embodied      — manufacturing emissions, assigned entirely to age 0 (kgCO2e).
+                          Frame/trailer use a $/kg embodied factor; batteries add a
+                          separate kgCO2e/kWh term for their manufacture.
+          emissions_supply — upstream (well-to-tank) emissions per year (kgCO2e/yr).
+          emissions_use    — tailpipe (tank-to-wheel) emissions per year (kgCO2e/yr).
+                             Zero for ZEVs (no combustion at point of use).
+        Supply and use emissions scale with annual_fuel, already in source units/km so
+        the emissions intensities (kgCO2e per source unit) apply directly.
+        """
         p = self.params
         emb = float(p['embodied'])
         embodied_total = (
@@ -417,6 +516,21 @@ class Vehicles:
         return np.full(len(self.age), float(val))
 
     def _calculate_capital_cost(self):
+        """
+        One-time purchase cost broken into labelled components (for plotting).
+
+        Components are looked up from vehicles.costs in data.json:
+          engine     — $/unit: hice/dhice use the hydrogen-engine price, all others diesel engine
+          motor      — $/kW × motor capacity
+          battery    — $/kWh × battery capacity (also includes ESS for phe/he)
+          h2_tank    — $/kg × tank capacity
+          fc         — $/kW × fuel-cell capacity
+          tank       — $/L × diesel tank capacity
+          charger    — depots only (not sleeper — sleeper trucks use en-route charging)
+          after_treatment — NOx catalyst; present in data.json for dice, he, phe, dhice
+
+        self.capital_total is the scalar sum used in annual_cost['capital'].
+        """
         c = {'base': float(self.params['base_cost'])}
         for comp_name, comp in self.params['components'].items():
             cap = float(comp.get('capacity', 0))
@@ -437,8 +551,8 @@ class Vehicles:
                 c['combustion_transmission'] = self._cap_cost('combustion_transmission')
             elif comp_name == 'electric_transmission':
                 c['electric_transmission'] = self._cap_cost('electric_transmission')
-        if self.p in AFTERTREATMENT_POWERTRAINS:
-            c['after_treatment'] = self._cap_cost('after_treatment')
+            elif comp_name == 'after_treatment':
+                c['after_treatment'] = self._cap_cost('after_treatment')
         if self.p in CHARGER_POWERTRAINS and self.k != 'sleeper':
             c['charger'] = self._cap_cost('charger_50kw')
         self.capital       = c
@@ -447,7 +561,22 @@ class Vehicles:
     # -- Annual cost & TCO -----------------------------------------------------
 
     def _calculate_annual_cost(self):
-        # Fuel cost
+        """
+        Five cost components, all in $/year as age arrays:
+
+          capital        — full purchase price at age 0, zero thereafter.  Placed here
+                           (rather than amortised) so _discount() gives the correct NPV.
+          operational    — maintenance, tyres, etc. proportional to km driven (actual distance).
+          fuel           — fuel cost in source units × time-varying price.
+                           For slow-charge BETs with en-route fast charging, km driven via
+                           en-route stops are re-billed at fast-charge rates with a different
+                           efficiency: grid_kWh = km × slow_fc × slow_eff / fast_eff.
+          driver         — wage proportional to target_distance (not actual), because the
+                           driver is paid whether or not the vehicle is range-constrained.
+          fc_replacements — time-varying $/kW × stack capacity at each replacement age.
+
+        Revenue is also computed here: annual_distance × payload_tonnes × revenue_per_tkm.
+        """
         fuel_cost    = np.zeros(len(self.age))
         battery_fuel = next((f for f in self.fuels if 'charge' in f), None)
         for f, annual in self.annual_fuel.items():
@@ -486,11 +615,20 @@ class Vehicles:
         }
         self.annual_revenue = (
             self.annual_distance
-            * float(self.mass['payload']) / 1000.0
+            * self.mass['payload'] / 1000.0
             * float(self.params['revenue_per_tkm'])
         )
 
     def _discount(self, annual):
+        """
+        Survival-weighted net-present value of an annual cost/revenue array.
+
+        NPV = Σ_a  annual[a] × survival_rate[a] / (1 + r)^a
+
+        survival_rate[a] ∈ [0, 1] is the probability the vehicle is still operating at age a,
+        so the expectation over the fleet is already embedded here (no separate fleet-level
+        discounting is needed).  r = DISCOUNT_RATE from settings.
+        """
         return float(np.sum(
             np.asarray(annual)
             * np.asarray(self.params['survival_rate'])
@@ -498,6 +636,14 @@ class Vehicles:
         ))
 
     def _calculate_tco_npv(self):
+        """
+        TCO = NPV sum of all cost components (capital + operating + fuel + driver + FC stack).
+        NPV = NPV(revenue) − TCO.
+
+        A higher NPV signals a more profitable vehicle from the operator's perspective and is
+        the utility term that drives multinomial logit market-share allocation in Fleet.
+        Note: TCO here is the total discounted cost of ownership, not cost per km.
+        """
         self.tco = sum(self._discount(v) for v in self.annual_cost.values())
         self.npv = self._discount(self.annual_revenue) - self.tco
 
@@ -549,13 +695,28 @@ class Fleet:
         return Vehicles(
             self.select_vehicle_params(k, p, t),
             self.params['fuels'],
-            self.params['drive_cycles'],
             self.params['vehicles']['costs'],
             p=p, k=k,
         )
 
     def _build_initial_stock(self):
-        """Pre-START_YEAR fleet: diesel cohorts only. Stock at START_YEAR sized to meet activity."""
+        """
+        Populate the pre-2025 diesel-only fleet so that cumulative activity at START_YEAR
+        matches the exogenous activity_req.
+
+        Sizing formula for cohort y (y < START_YEAR):
+            stock[k, dice, y, START_YEAR] = activity_req[k, START_YEAR]
+                                            × (1 + growth_rate)^(y - START_YEAR)
+                                            × survival_rate[START_YEAR - y]
+                                            / denom
+
+        denom = Σ_a  annual_distance[a] × survival_rate[a] × (1 + growth_rate)^(-a)
+        is the survival-and-growth-weighted activity per vehicle over a full MAX_AGE lifespan.
+        Dividing by denom converts a total activity target into a number of vehicles per cohort.
+
+        The oldest cohort (age MAX_AGE-1 at START_YEAR) is used as the denominator reference
+        to stay consistent with the Paper 1 calibration.
+        """
         for k in self.K:
             for y in range(START_YEAR - MAX_AGE, START_YEAR):
                 self.vehicles[k, 'dice', y] = self._make_vehicle(k, 'dice', y)
@@ -577,7 +738,22 @@ class Fleet:
                 )
 
     def _run(self):
-        """Year-by-year simulation START_YEAR → END_YEAR."""
+        """
+        Year-by-year simulation START_YEAR → END_YEAR.  Each year has three steps:
+
+        1. Roll-over: surviving vehicles from t-1 advance one year.  Stock is scaled by
+           the conditional survival ratio  survival_rate[a] / survival_rate[a-1]  rather
+           than the raw survival_rate so that each cohort declines at the correct marginal
+           rate.
+
+        2. Build new vehicles: a fresh Vehicles object is created for every (k, p, t)
+           combination.  Parameters (prices, efficiencies, etc.) are time-sliced to year t
+           by select_vehicle_params().
+
+        3. Market share + new purchases: _calculate_market_share() allocates fractions
+           across powertrains; then the shortfall between activity_req and activity_met
+           by surviving cohorts is filled by new sales split according to those fractions.
+        """
         for t in self.years:
             # Roll surviving cohorts from t-1
             if t > START_YEAR:
@@ -614,7 +790,22 @@ class Fleet:
                     self.stock[k, p, t, t] = np.float32(new_sales * self.market_share[k, p, t])
 
     def _calculate_market_share(self, k, t):
-        """Multinomial logit with iterative production cap."""
+        """
+        Multinomial logit with iterative production-cap enforcement.
+
+        Unconstrained logit share for powertrain p:
+            share(p) = exp(λ × NPV(p)) / Σ_q exp(λ × NPV(q))
+
+        where λ = price_lambda (controls sensitivity to NPV differences; higher λ → winner-takes-
+        all, λ → 0 → uniform shares).
+
+        Production cap: nascent technologies cannot grow faster than their supply chain allows.
+        _market_share_limit() returns the maximum achievable share given last year's share and
+        cagr_nacent / cagr_mature parameters.  If a powertrain's unconstrained share exceeds its
+        cap, its share is fixed at the cap and the remaining market is re-allocated by running
+        another logit over the unconstrained powertrains.  This repeats until no new caps bind
+        (up to 10 iterations, which is always sufficient in practice).
+        """
         remaining     = set(self.P[k])
         mkt_remaining = 1.0
         for _ in range(10):
@@ -635,7 +826,14 @@ class Fleet:
                 break  # Converged — no new production-limited powertrains
 
     def _aggregate(self):
-        """Sum stock, fuel, emissions, and system costs across all cohorts."""
+        """
+        Sum stock, fuel, emissions, and system costs across all cohorts for each calendar year.
+
+        Capital costs are accounted at the point of sale (year t = model year y), not amortised,
+        to be consistent with how annual_cost['capital'] is structured in Vehicles.
+        Operational, fuel, and driver costs are summed age-by-age across all surviving cohorts.
+        Emissions (embodied/supply/use) follow the same cohort-age loop.
+        """
         T = self.years
 
         self.total_stock = {
@@ -679,22 +877,45 @@ class Fleet:
                         self.system_costs[k]['capital'][i] += self.stock.get((k, p, y, y), 0.0) * v.capital_total
 
     def select_vehicle_params(self, k, p, y):
-        # Merge shared + powertrain params
+        """
+        Build the params dict for a single (vehicle type k, powertrain p, model year y) cohort.
+
+        Three-step merge:
+          1. Start with shared params for vehicle type k (base_cost, running_cost, payload, …).
+          2. Overlay powertrain-specific params (|= lets powertrain values win on conflicts).
+          3. For each component referenced in the powertrain, fill in shared component specs
+             from vehicles.components[type][comp_name] — but only for keys not already set
+             by the powertrain (so per-powertrain overrides are preserved).
+
+        Then set_year() slices all time-varying arrays to scalar values at year y.
+        Age-varying arrays (target_distance, drive_cycle, survival_rate) are excluded from
+        set_year() because Vehicles uses them indexed by vehicle age, not calendar year.
+        """
         vehicle_params  = copy.deepcopy(self.params['vehicles']['types'][k]['shared'])
         vehicle_params |= copy.deepcopy(self.params['vehicles']['types'][k]['powertrains'][p])
-        # Fill in shared component definitions (powertrain-specific values take precedence)
         for comp_name, comp in list(vehicle_params['components'].items()):
             shared_def = copy.deepcopy(self.params['vehicles']['components'][comp['type']][comp_name])
             comp.update({kk: v for kk, v in shared_def.items() if kk not in comp})
-        # Time-slice to model year y (target_distance, drive_cycle, survival_rate stay as age arrays)
         vehicle_params['model_year'] = y
-        exclude = {'target_distance', 'drive_cycle', 'survival_rate'}
+        exclude = {'target_distance', 'drive_cycle', 'survival_rate', 'average_speed', 'payload'}
         for key in list(vehicle_params.keys()):
             if key not in exclude:
                 vehicle_params[key] = set_year(vehicle_params[key], year=y)
         return vehicle_params
 
     def realise_uncertainties(self, param_cps):
+        """
+        Apply a Monte Carlo draw to every uncertain parameter in the params tree.
+
+        param_cps maps (key_path_tuple) → cp ∈ [0, 1].  Key paths are produced by
+        get_uncertainty_distributions(), which walks the nested params dict and returns
+        every leaf that has a 'dist' key.
+
+        set_param() converts the cumulative probability cp to a realised value (scalar
+        or time-series array depending on the distribution type).  Because a single cp
+        is shared across all parameters in one MC run, correlated quantities — e.g. the
+        same component parameter used by multiple powertrains — move together.
+        """
         for keys, cp in param_cps.items():
             d = self.params
             for k in keys[:-1]:
@@ -710,7 +931,7 @@ if __name__ == "__main__":
     np.random.seed(0)
     inputs_distributions = dict(get_uncertainty_distributions(PARAMS))
     param_cps = dict(zip(inputs_distributions.keys(), np.random.rand(len(inputs_distributions)).astype('float32')))
-    fleet = Fleet(PARAMS, param_cps, exclude_powertrains=('phe',))
+    fleet = Fleet(PARAMS, param_cps)
 
     v = fleet.vehicles['sleeper', 'dice', START_YEAR]
     print('Total mass:               ', v.total_mass, 'kg')

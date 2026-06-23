@@ -2,7 +2,9 @@
 To do: deal with peak efficiency peoperly.
 """
 import json
+import os
 import numpy as np
+import fastsim as fsim
 import pandas as pd
 import copy
 import matplotlib.pyplot as plt
@@ -12,26 +14,29 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import r2_score, mean_absolute_percentage_error
 import time
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+def _path(fname):
+    return os.path.join(_HERE, fname)
+
 # Load drive-cycle.
 def load_drive_cycle(fname="drive_cycles/regional_haul.json"):
-    with open(fname, "r") as f:
+    with open(_path(fname), "r") as f:
         cyc_json_str = f.read()
     cyc_dict = json.loads(cyc_json_str)
     return fsim.Cycle.from_pydict(cyc_dict)
 
 DRIVE_CYCLES = {
-    # 'short_haul': load_drive_cycle('drive_cycles/short_haul.json'),
-    # 'regional_haul': load_drive_cycle('drive_cycles/regional_haul.json'),
-    # 'long_haul': load_drive_cycle('drive_cycles/long_haul.json'),
-    'udds_hdt': load_drive_cycle('drive_cycles/udds_hdt.json'),
+    'udds_hdt':   load_drive_cycle('drive_cycles/udds_hdt.json'),
     'cruise_hdt': load_drive_cycle('drive_cycles/cruise_hdt.json'),
-    'short_haul': load_drive_cycle('drive_cycles/udds_hdt.json'),
-    'regional_haul': load_drive_cycle('drive_cycles/udds_hdt.json'),
-    'long_haul': load_drive_cycle('drive_cycles/cruise_hdt.json'),
+    # 'short_haul':    load_drive_cycle('drive_cycles/short_haul.json'),
+    # 'regional_haul': load_drive_cycle('drive_cycles/regional_haul.json'),
+    # 'long_haul':     load_drive_cycle('drive_cycles/long_haul.json'),
 }
+DRIVE_CYCLES['short_haul']    = DRIVE_CYCLES['udds_hdt']
+DRIVE_CYCLES['regional_haul'] = DRIVE_CYCLES['udds_hdt']
+DRIVE_CYCLES['long_haul']     = DRIVE_CYCLES['cruise_hdt']
 
-# Create the vehicle.
-MAX_ENGINE_POWER = 500
 VEHICLES = {
     'dice': { # Adapted Line Haul Conv.
         "name": "hdt_diesel",
@@ -474,8 +479,6 @@ def calculate_fuel_consumption(
         veh_dict['pt_type']['HEV']['fs']['energy_capacity_joules'] = fuel_capacity * fuel_lhv
     if veh_type == 'phe':
         pass
-    if veh_type == 'phe_series':
-        pass
     if veh_type == 'fc':
         # Scale efficiency
         eff_data = veh_dict['pt_type']['HEV']['fc']['eff_interp_from_pwr_out']['data']['values']['data']
@@ -509,9 +512,6 @@ def calculate_fuel_consumption(
     if veh_type == 'he':
         fuel_consumption['Diesel'] = res['veh']['pt_type']['HEV']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
     if veh_type == 'phe':
-        fuel_consumption['Diesel'] = res['veh']['pt_type']['PHEV']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
-        fuel_consumption['Electricity'] = res['veh']['pt_type']['PHEV']['res']['state']['energy_out_chemical_joules'] / 3.6e6 / dist_km
-    if veh_type == 'phe_series':
         fuel_consumption['Diesel'] = res['veh']['pt_type']['PHEV']['fc']['state']['energy_fuel_joules'] / 35.8e6 / dist_km
         fuel_consumption['Electricity'] = res['veh']['pt_type']['PHEV']['res']['state']['energy_out_chemical_joules'] / 3.6e6 / dist_km
     if veh_type == 'fc':
@@ -587,7 +587,7 @@ def print_results(results):
     print(f"\n--- Model Performance ---")
     print(f"R2 Score: {results['r2']:.6f}")
     print(f"Mean Absolute Error: {results['mape']:.4f}%")
-    print(f"Intercept (L/100km): {results['intercept']:.4f}")
+    print(f"Intercept (L/km): {results['intercept']:.4f}")
     print("\n--- Coefficients Table (for Paper 2) ---")
     coef_df = pd.DataFrame({
         'Feature': results['feature_names'],
@@ -606,6 +606,24 @@ def save_model_to_json(results, filename='model_params.json'):
     }
     with open(filename, 'w') as f:
         json.dump(params, f, indent=4)
+
+def save_surrogate(results, p, dc, path='surrogates.json'):
+    """Upsert a single (p, dc) entry into the combined surrogates file."""
+    path = _path(path)
+    try:
+        with open(path) as f:
+            surrogates = json.load(f)
+    except FileNotFoundError:
+        surrogates = {}
+    model = results['model']
+    surrogates.setdefault(p, {})[dc] = {
+        'features':  dict(zip(results['feature_names'], model.coef_.tolist())),
+        'intercept': float(model.intercept_),
+        'r2':        float(results['r2']),
+        'mape':      float(results['mape']),
+    }
+    with open(path, 'w') as f:
+        json.dump(surrogates, f, indent=4)
 
 def load_model_params(json_path='model_params.json'):
     with open(json_path, 'r') as f:
@@ -727,20 +745,17 @@ if __name__ == '__main__':
     # ps = ['he']
     # ps = ['be']
     # Drive cycles
-    dc = 'udds_hdt'
     # dcs = ['udds_hdt', 'cruise_hdt']
     dcs = ['short_haul', 'regional_haul', 'long_haul']
-    dc = 'long_haul'
     for dc in dcs:
         for p in ps:
-            fname = 'drive_cycles/' + p + '_' + dc + '.json'
             scheme = SCHEMES[p]
             scheme['fixed']['cyc'] = DRIVE_CYCLES[dc]
             results = analyze_test_scheme(scheme, n_train=100, n_test=20)
             # print_results(results)
-            save_model_to_json(results, filename=fname)
-            
-            model_params = load_model_params(fname)
+            save_surrogate(results, p, dc)
+
+            model_params = load_model_params(_path('surrogates.json'))[p][dc]
             my_truck = {
                 key: np.mean(val) for key, val in scheme['ranges'].items()
             }
@@ -749,23 +764,6 @@ if __name__ == '__main__':
             t1 = time.time()
             var = list(calculate_fuel_consumption(**{**scheme['fixed'], **my_truck}).values())[0]
             t2 = time.time()
-            print(f"{p}, {dc}:\n {test:.5f}")#\n {var:.5f}")
-            print(f'model: {(t1-t0 + 1e-10)/(t2-t1 + 1e-10)}')
-
-    # veh = fsim.Vehicle.from_pydict(VEHICLES[p])
-    # cyc = DRIVE_CYCLES[dc]
-    # sim = fsim.SimDrive(veh, cyc)
-    # # sim_dict = sim.to_pydict()
-    # # sim = fsim.SimDrive.from_pydict(sim_dict)
-    # fuel_consumption = calculate_fuel_consumption(**{**scheme['fixed'], **my_truck})
-    # print(fuel_consumption)
-    # sim.walk()
-    # res = sim.to_pydict()
-
-    # veh_dict = veh.to_pydict()
-    
-    # # Fuel converter power curve
-    # x = veh_dict['pt_type']['Conv']['fc']['eff_interp_from_pwr_out']['data']['grid'][0]['data']
-    # y = veh_dict['pt_type']['Conv']['fc']['eff_interp_from_pwr_out']['data']['values']['data']
-    # plt.plot(x, y)
+            print(f"{p}, {dc}:\n {test:.5f}\n {var:.5f}")
+            print(f'Time: {(t1-t0 + 1e-10)/(t2-t1 + 1e-10)}')
     # plt.plot(cyc.to_pydict()['speed_meters_per_second'])

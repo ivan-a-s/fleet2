@@ -20,15 +20,18 @@
     "drive_cycles": {
         "long_haul": {
             "path": "param_estimation/energy_consumption/Fleet DNA Long-Haul Representative_.csv",
-            "average_speed": 88.12
+            "average_speed": 88.12,
+            "payload": 16000
         },
         "regional_haul": {
             "path": "param_estimation/energy_consumption/Fleet DNA Regional-Haul Representative_.csv",
-            "average_speed": 63.94
+            "average_speed": 63.94,
+            "payload": 10000
         },
         "short_haul": {
             "path": "param_estimation/energy_consumption/Fleet DNA Local Delivery Representative_.csv",
-            "average_speed": 61.15
+            "average_speed": 61.15,
+            "payload": 4000
         }
     },
 
@@ -195,12 +198,10 @@
             },
             "ess": {
                 "diesel_tank": {
-                    "mass_per_unit": 0.0,
-                    "embodied_per_unit": 0.0,
+                    "specific_mass": 0.0,
+                    "embodied_emissions": 0.0,
                     "usable_capacity": 0.95,
-                    "refuel_rate": 6000,
-                    "efficiency": 1.0,
-                    "efficiency_deg": 0.0
+                    "refuel_rate": 6000
                 },
                 "battery": {
                     "specific_mass": {
@@ -220,7 +221,7 @@
                         "2030": {"dist": "uniform", "min": 0.85, "max": 0.90},
                         "2050": {"dist": "uniform", "min": 0.9, "max": 0.95}
                     },
-                    "charging_rate": {
+                    "refuel_rate": {
                         "dist": "linear",
                         "start": {"dist": "const", "val": 250.0},
                         "end": {"dist": "triangle", "min": 250.0, "mode": 500.0, "max": 750.0}
@@ -268,6 +269,9 @@
                     "efficiency": 0.97,
                     "mass": 204
                 }
+            },
+            "accessories": {
+                "after_treatment": {}
             }
         },
 
@@ -322,7 +326,7 @@
                 "shared": {
                     "max_age": 25,
                     "activity_proportion": 0.77,
-                    "default_payload": 16000,
+
                     "default_unloaded_mass": 12938,
                     "gvwl": 53500,
                     "gvwl_increase": 5000,
@@ -365,7 +369,8 @@
                         "components": {
                             "ice":                     {"type": "converter"},
                             "diesel_tank":             {"type": "ess",          "capacity": 500},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {"diesel": {"proportion": 1.0}},
                         "regen_efficiency": 0.0,
@@ -381,30 +386,12 @@
                             "motor":                   {"type": "converter",    "capacity": 220},
                             "diesel_tank":             {"type": "ess",          "capacity": 500},
                             "battery":                 {"type": "ess",          "capacity": 10},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
                             "diesel":      {"proportion": 0.999},
                             "slow_charge": {"proportion": 0.001}
-                        },
-                        "regen_efficiency": 0.71,
-                        "accessory_load": 3400,
-                        "running_cost": 0.17,
-                        "init_market_limit": 0.02,
-                        "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
-                        "cagr_mature": {"dist": "uniform", "min": 0.34, "max": 0.38}
-                    },
-                    "phe": {
-                        "components": {
-                            "ice":                     {"type": "converter"},
-                            "motor":                   {"type": "converter",    "capacity": 220},
-                            "diesel_tank":             {"type": "ess",          "capacity": 500},
-                            "battery":                 {"type": "ess",          "capacity": 100},
-                            "combustion_transmission": {"type": "transmission"}
-                        },
-                        "fuels": {
-                            "diesel":      {"proportion": 0.95},
-                            "fast_charge": {"proportion": 0.08}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -467,7 +454,8 @@
                             "ice":                     {"type": "converter"},
                             "diesel_tank":             {"type": "ess",          "capacity": 500},
                             "h2_350bar":               {"type": "ess",          "capacity": 20},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
                             "diesel": {"proportion": 0.75},
@@ -487,7 +475,7 @@
                 "shared": {
                     "max_age": 25,
                     "activity_proportion": 0.17,
-                    "default_payload": 10000,
+
                     "default_unloaded_mass": 12266,
                     "gvwl": 53500,
                     "gvwl_increase": 3000,
@@ -530,7 +518,8 @@
                         "components": {
                             "ice":                     {"type": "converter"},
                             "diesel_tank":             {"type": "ess",          "capacity": 500},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {"diesel": {"proportion": 1.0}},
                         "regen_efficiency": 0.0,
@@ -546,30 +535,12 @@
                             "motor":                   {"type": "converter",    "capacity": 220},
                             "diesel_tank":             {"type": "ess",          "capacity": 500},
                             "battery":                 {"type": "ess",          "capacity": 5},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
                             "diesel":      {"proportion": 0.999},
                             "slow_charge": {"proportion": 0.001}
-                        },
-                        "regen_efficiency": 0.71,
-                        "accessory_load": 3400,
-                        "running_cost": 0.17,
-                        "init_market_limit": 0.02,
-                        "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
-                        "cagr_mature": {"dist": "uniform", "min": 0.34, "max": 0.38}
-                    },
-                    "phe": {
-                        "components": {
-                            "ice":                     {"type": "converter"},
-                            "motor":                   {"type": "converter",    "capacity": 220},
-                            "diesel_tank":             {"type": "ess",          "capacity": 500},
-                            "battery":                 {"type": "ess",          "capacity": 100},
-                            "combustion_transmission": {"type": "transmission"}
-                        },
-                        "fuels": {
-                            "diesel":      {"proportion": 0.84},
-                            "slow_charge": {"proportion": 0.16}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -616,7 +587,7 @@
                     "hice": {
                         "components": {
                             "ice":                     {"type": "converter"},
-                            "h2_350bar":               {"type": "ess",          "capacity": 60},
+                            "h2_350bar":               {"type": "ess",          "capacity": 70},
                             "combustion_transmission": {"type": "transmission"}
                         },
                         "fuels": {"h2": {"proportion": 1.0}},
@@ -632,7 +603,8 @@
                             "ice":                     {"type": "converter"},
                             "diesel_tank":             {"type": "ess",          "capacity": 500},
                             "h2_350bar":               {"type": "ess",          "capacity": 20},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
                             "diesel": {"proportion": 0.75},
@@ -652,7 +624,7 @@
                 "shared": {
                     "max_age": 25,
                     "activity_proportion": 0.06,
-                    "default_payload": 4000,
+
                     "default_unloaded_mass": 9857,
                     "gvwl": 24250,
                     "gvwl_increase": 2000,
@@ -689,7 +661,8 @@
                         "components": {
                             "ice":                     {"type": "converter"},
                             "diesel_tank":             {"type": "ess",          "capacity": 250},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {"diesel": {"proportion": 1.0}},
                         "regen_efficiency": 0.0,
@@ -705,30 +678,12 @@
                             "motor":                   {"type": "converter",    "capacity": 220},
                             "diesel_tank":             {"type": "ess",          "capacity": 500},
                             "battery":                 {"type": "ess",          "capacity": 5},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
                             "diesel":      {"proportion": 0.999},
                             "slow_charge": {"proportion": 0.001}
-                        },
-                        "regen_efficiency": 0.71,
-                        "accessory_load": 3400,
-                        "running_cost": 0.17,
-                        "init_market_limit": 0.02,
-                        "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
-                        "cagr_mature": {"dist": "uniform", "min": 0.34, "max": 0.38}
-                    },
-                    "phe": {
-                        "components": {
-                            "ice":                     {"type": "converter"},
-                            "motor":                   {"type": "converter",    "capacity": 220},
-                            "diesel_tank":             {"type": "ess",          "capacity": 500},
-                            "battery":                 {"type": "ess",          "capacity": 100},
-                            "combustion_transmission": {"type": "transmission"}
-                        },
-                        "fuels": {
-                            "diesel":      {"proportion": 0.70},
-                            "slow_charge": {"proportion": 0.30}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -791,7 +746,8 @@
                             "ice":                     {"type": "converter"},
                             "diesel_tank":             {"type": "ess",          "capacity": 500},
                             "h2_350bar":               {"type": "ess",          "capacity": 20},
-                            "combustion_transmission": {"type": "transmission"}
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
                             "diesel": {"proportion": 0.75},

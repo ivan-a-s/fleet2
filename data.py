@@ -32,6 +32,15 @@ with open(os.path.join(_HERE, 'data.json')) as _f:
 _MAX_AGE = _raw['settings']['max_age']
 PARAMS = _expand_arrays(_raw, _MAX_AGE)
 
+# Precompute average_speed as an age-array for each vehicle type by mapping the
+# drive_cycle name at each age to the speed stored in drive_cycles[dc]['average_speed'].
+_dc_speeds   = {dc: PARAMS['drive_cycles'][dc]['average_speed'] for dc in PARAMS['drive_cycles']}
+_dc_payloads = {dc: PARAMS['drive_cycles'][dc]['payload']       for dc in PARAMS['drive_cycles']}
+for _k in PARAMS['vehicles']['types']:
+    _shared = PARAMS['vehicles']['types'][_k]['shared']
+    _shared['average_speed'] = np.array([_dc_speeds[dc]   for dc in _shared['drive_cycle']])
+    _shared['payload']       = np.array([_dc_payloads[dc] for dc in _shared['drive_cycle']])
+
 MAX_AGE      = PARAMS['settings']['max_age']
 AIR_DENSITY  = PARAMS['settings']['air_density']
 GRAVITY      = PARAMS['settings']['gravity']

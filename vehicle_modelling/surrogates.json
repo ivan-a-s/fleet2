@@ -1,0 +1,350 @@
+{
+    "be": {
+        "cruise_hdt": {
+            "features": {
+                "mass": -8.991667378638648e-08,
+                "drag_coef": 0.0031831041939692924,
+                "accessory_load": 1.640580651746323e-06,
+                "inv_eff": 0.010701759117617782,
+                "mass drag_coef": -5.216885654341431e-08,
+                "mass accessory_load": 1.9821696367605668e-12,
+                "mass inv_eff": 1.7463182372267053e-06,
+                "drag_coef accessory_load": -2.1802675833238162e-07,
+                "drag_coef inv_eff": 0.08263804890446239,
+                "accessory_load inv_eff": -9.207341148893034e-09
+            },
+            "intercept": -0.0010467946753474344,
+            "r2": 0.9999790914373281,
+            "mape": 0.14260325888472256
+        },
+        "long_haul": {
+            "features": {
+                "mass": -1.0283870631374442e-06,
+                "drag_coef": 0.03288938919433447,
+                "accessory_load": 1.5192613085567158e-05,
+                "inv_eff": 0.10084666634617119,
+                "mass drag_coef": -8.098294116876801e-07,
+                "mass accessory_load": 2.535568977002356e-12,
+                "mass inv_eff": 1.7629123911689872e-05,
+                "drag_coef accessory_load": 1.3272536238142799e-06,
+                "drag_coef inv_eff": 0.8176470907212363,
+                "accessory_load inv_eff": -2.42794825584146e-07
+            },
+            "intercept": -0.0023315444980569477,
+            "r2": 0.9999877280004213,
+            "mape": 0.08164088083518233
+        },
+        "regional_haul": {
+            "features": {
+                "mass": -9.784830295171255e-06,
+                "drag_coef": 0.07738030687622129,
+                "accessory_load": 3.269543384811533e-05,
+                "inv_eff": 0.13491666770684166,
+                "mass drag_coef": -6.868783993393521e-07,
+                "mass accessory_load": -3.721593866412576e-11,
+                "mass inv_eff": 3.7035623533900226e-05,
+                "drag_coef accessory_load": -1.3017558935926956e-06,
+                "drag_coef inv_eff": 0.4574332772251191,
+                "accessory_load inv_eff": 9.446367540003729e-07
+            },
+            "intercept": -0.01217905635997063,
+            "r2": 0.99995303158985,
+            "mape": 0.24249159421066155
+        },
+        "short_haul": {
+            "features": {
+                "mass": -8.981902132332227e-06,
+                "drag_coef": 0.08027583988676484,
+                "accessory_load": 3.3897655538975585e-05,
+                "inv_eff": 0.14284815820411523,
+                "mass drag_coef": -1.396086191920561e-06,
+                "mass accessory_load": -3.431889494809326e-11,
+                "mass inv_eff": 3.676361508381314e-05,
+                "drag_coef accessory_load": -8.167996034490258e-07,
+                "drag_coef inv_eff": 0.4635297750527785,
+                "accessory_load inv_eff": -3.719173854669698e-08
+            },
+            "intercept": -0.03143830117700741,
+            "r2": 0.9998884168414277,
+            "mape": 0.2628121450890729
+        },
+        "udds_hdt": {
+            "features": {
+                "mass": -8.278766934336551e-07,
+                "drag_coef": 0.006635038566596144,
+                "accessory_load": 3.115545327000259e-06,
+                "inv_eff": 0.014358189118211741,
+                "mass drag_coef": -7.696675868478704e-08,
+                "mass accessory_load": -4.597316451138145e-12,
+                "mass inv_eff": 3.650458158986761e-06,
+                "drag_coef accessory_load": -6.016573859495966e-08,
+                "drag_coef inv_eff": 0.04679636440547692,
+                "accessory_load inv_eff": 1.8487161927836847e-07
+            },
+            "intercept": -0.003316326176430462,
+            "r2": 0.9999507198662012,
+            "mape": 0.2678323004723681
+        }
+    },
+    "dice": {
+        "cruise_hdt": {
+            "features": {
+                "mass": -4.5884259391546763e-07,
+                "drag_coef": -0.015404451520687442,
+                "accessory_load": -1.7104615210841297e-06,
+                "inv_eff": 0.07607471642602019,
+                "mass drag_coef": 7.015477863648737e-07,
+                "mass accessory_load": 1.067853271086161e-11,
+                "mass inv_eff": 1.3763947814984447e-06,
+                "drag_coef accessory_load": 1.5828575589229586e-06,
+                "drag_coef inv_eff": 0.055749348642833374,
+                "accessory_load inv_eff": 1.0766269701242686e-06
+            },
+            "intercept": 0.013271804825275069,
+            "r2": 0.99936115982725,
+            "mape": 0.45824965489359776
+        },
+        "long_haul": {
+            "features": {
+                "mass": -2.724380969232376e-07,
+                "drag_coef": -0.007374251952336785,
+                "accessory_load": -1.7501991628681397e-06,
+                "inv_eff": 0.08168674001639353,
+                "mass drag_coef": 6.995847861310624e-07,
+                "mass accessory_load": 8.991108205180787e-12,
+                "mass inv_eff": 1.2979401256676492e-06,
+                "drag_coef accessory_load": 2.0627172772060556e-06,
+                "drag_coef inv_eff": 0.050525810055621886,
+                "accessory_load inv_eff": 9.445298679765929e-07
+            },
+            "intercept": 0.0029288286812315656,
+            "r2": 0.9989730560130675,
+            "mape": 0.4934051974041435
+        },
+        "regional_haul": {
+            "features": {
+                "mass": -6.654406842752315e-07,
+                "drag_coef": -0.03651099110467,
+                "accessory_load": -5.7627910095811e-07,
+                "inv_eff": 0.18274398551625023,
+                "mass drag_coef": 5.629606164055634e-07,
+                "mass accessory_load": -2.2884735773054388e-11,
+                "mass inv_eff": 2.701177006455351e-06,
+                "drag_coef accessory_load": 2.596979059416084e-06,
+                "drag_coef inv_eff": 0.042481870424473746,
+                "accessory_load inv_eff": 6.040505338567594e-07
+            },
+            "intercept": 0.02610741508524106,
+            "r2": 0.9988268010180582,
+            "mape": 0.4772643926271353
+        },
+        "short_haul": {
+            "features": {
+                "mass": -1.6951291623419575e-07,
+                "drag_coef": 0.0028079861456585566,
+                "accessory_load": -2.9938414547496625e-06,
+                "inv_eff": 0.19261313448900105,
+                "mass drag_coef": 2.0078728937307227e-07,
+                "mass accessory_load": 1.5437598248346784e-11,
+                "mass inv_eff": 2.48926621735312e-06,
+                "drag_coef accessory_load": 2.247083832404774e-06,
+                "drag_coef inv_eff": 0.028336341717493514,
+                "accessory_load inv_eff": 1.6225095223939298e-06
+            },
+            "intercept": 0.0020234920747608243,
+            "r2": 0.9955987960375879,
+            "mape": 0.7267792238242134
+        },
+        "udds_hdt": {
+            "features": {
+                "mass": -4.803849232112526e-07,
+                "drag_coef": -0.026666636515864116,
+                "accessory_load": -1.7436186645272336e-06,
+                "inv_eff": 0.17891674498282092,
+                "mass drag_coef": 5.9452040566496596e-08,
+                "mass accessory_load": -4.292293950824977e-11,
+                "mass inv_eff": 2.757727108619576e-06,
+                "drag_coef accessory_load": 2.4424105517462114e-06,
+                "drag_coef inv_eff": 0.042736189978607154,
+                "accessory_load inv_eff": 1.4649940741898815e-06
+            },
+            "intercept": 0.02738327865975354,
+            "r2": 0.9972807361009284,
+            "mape": 0.8057441997146941
+        }
+    },
+    "fc": {
+        "cruise_hdt": {
+            "features": {
+                "mass": 2.5925417448385936e-08,
+                "drag_coef": 0.001591835038107541,
+                "accessory_load": -5.431092991978148e-08,
+                "inv_eff": 0.0049875825623573854,
+                "mass drag_coef": -5.64316003059926e-08,
+                "mass accessory_load": 7.262367790472624e-13,
+                "mass inv_eff": 5.358470373519067e-07,
+                "drag_coef accessory_load": -3.7360495000277556e-08,
+                "drag_coef inv_eff": 0.02294774046391189,
+                "accessory_load inv_eff": 9.625903120941885e-07
+            },
+            "intercept": -0.000636451949882072,
+            "r2": 0.9996977734640824,
+            "mape": 0.4941761299021946
+        },
+        "long_haul": {
+            "features": {
+                "mass": 3.506664107371811e-08,
+                "drag_coef": -0.00038397378279184997,
+                "accessory_load": -9.852830574668597e-08,
+                "inv_eff": 0.004619740362421913,
+                "mass drag_coef": -4.9709381421259016e-08,
+                "mass accessory_load": 1.0272033874533792e-12,
+                "mass inv_eff": 5.329226542605133e-07,
+                "drag_coef accessory_load": 5.50744517780438e-08,
+                "drag_coef inv_eff": 0.023837825747835772,
+                "accessory_load inv_eff": 9.417262867255204e-07
+            },
+            "intercept": 0.0001622148004196966,
+            "r2": 0.9990739402021622,
+            "mape": 0.7567669339217512
+        },
+        "regional_haul": {
+            "features": {
+                "mass": -1.029853755198205e-07,
+                "drag_coef": 0.0038437289580956985,
+                "accessory_load": -1.678828350561578e-07,
+                "inv_eff": 0.015325270133078257,
+                "mass drag_coef": 2.3105765225717054e-07,
+                "mass accessory_load": 9.689514815502953e-12,
+                "mass inv_eff": 1.0133103079832034e-06,
+                "drag_coef accessory_load": -5.9979843568435325e-09,
+                "drag_coef inv_eff": 0.008151076999252355,
+                "accessory_load inv_eff": 1.6647470245395418e-06
+            },
+            "intercept": -0.0015392169913975157,
+            "r2": 0.9974584059622141,
+            "mape": 1.8549216884714206
+        },
+        "short_haul": {
+            "features": {
+                "mass": -1.114246539113885e-07,
+                "drag_coef": 0.009688236583147785,
+                "accessory_load": 1.674283555616231e-07,
+                "inv_eff": 0.01403605168801794,
+                "mass drag_coef": 8.850775281837384e-10,
+                "mass accessory_load": 1.8095349871294353e-11,
+                "mass inv_eff": 1.0620770212944286e-06,
+                "drag_coef accessory_load": -4.348891661660882e-07,
+                "drag_coef inv_eff": 0.00897725092328895,
+                "accessory_load inv_eff": 1.5051727440164433e-06
+            },
+            "intercept": -0.0025984403581589682,
+            "r2": 0.9932517154174414,
+            "mape": 2.978844347915357
+        },
+        "udds_hdt": {
+            "features": {
+                "mass": -2.0462482885465381e-07,
+                "drag_coef": -0.004183202390381092,
+                "accessory_load": 6.866504347214619e-07,
+                "inv_eff": 0.011915866399752284,
+                "mass drag_coef": 1.212580753574467e-07,
+                "mass accessory_load": -9.945872250782806e-13,
+                "mass inv_eff": 1.1415478413356142e-06,
+                "drag_coef accessory_load": 5.853002025299987e-07,
+                "drag_coef inv_eff": 0.01323989902348969,
+                "accessory_load inv_eff": 1.2338041213515392e-06
+            },
+            "intercept": 0.001435394245107413,
+            "r2": 0.9916186613503942,
+            "mape": 1.9099429875896197
+        }
+    },
+    "he": {
+        "cruise_hdt": {
+            "features": {
+                "mass": 1.1283827403270281e-07,
+                "drag_coef": -0.01348132901539762,
+                "accessory_load": 1.8554335641139222e-06,
+                "inv_eff": 0.05544076799272901,
+                "mass drag_coef": 6.727435527929558e-07,
+                "mass accessory_load": -1.730236613706193e-11,
+                "mass inv_eff": 1.2168534101137247e-06,
+                "drag_coef accessory_load": 2.207380830908785e-06,
+                "drag_coef inv_eff": 0.062049198085282954,
+                "accessory_load inv_eff": 1.5322148845236956e-06
+            },
+            "intercept": -0.010658067024605478,
+            "r2": 0.9959911708019602,
+            "mape": 0.7887016235892339
+        },
+        "long_haul": {
+            "features": {
+                "mass": -4.935624662756792e-07,
+                "drag_coef": -0.028380234796564065,
+                "accessory_load": -6.760952763053517e-07,
+                "inv_eff": 0.04582665139814656,
+                "mass drag_coef": 9.965395551010228e-07,
+                "mass accessory_load": -6.395665247405091e-12,
+                "mass inv_eff": 1.3874064839286094e-06,
+                "drag_coef accessory_load": 1.0154921417570599e-06,
+                "drag_coef inv_eff": 0.06605124621872663,
+                "accessory_load inv_eff": 2.8552677673975452e-06
+            },
+            "intercept": 0.014817517123517698,
+            "r2": 0.9979749337633206,
+            "mape": 0.7895548563373502
+        },
+        "regional_haul": {
+            "features": {
+                "mass": -8.558141929830984e-07,
+                "drag_coef": -0.07021485966444953,
+                "accessory_load": -3.565243309896319e-06,
+                "inv_eff": 0.06283399153155442,
+                "mass drag_coef": 9.245672383637104e-07,
+                "mass accessory_load": 7.419261038865699e-11,
+                "mass inv_eff": 2.7420615002754484e-06,
+                "drag_coef accessory_load": 8.298916939907509e-07,
+                "drag_coef inv_eff": 0.0580043018136432,
+                "accessory_load inv_eff": 5.160251861150477e-06
+            },
+            "intercept": 0.047227688248348165,
+            "r2": 0.9955899855832674,
+            "mape": 1.0633465317069501
+        },
+        "short_haul": {
+            "features": {
+                "mass": -2.1155688528258772e-08,
+                "drag_coef": 0.018577868479445845,
+                "accessory_load": -5.298390426412611e-06,
+                "inv_eff": 0.06334804561989871,
+                "mass drag_coef": -8.737452079797782e-07,
+                "mass accessory_load": 2.002037424730929e-11,
+                "mass inv_eff": 2.817545011139252e-06,
+                "drag_coef accessory_load": 2.140418264236048e-06,
+                "drag_coef inv_eff": 0.036266186990963664,
+                "accessory_load inv_eff": 6.353436454782071e-06
+            },
+            "intercept": 0.021980664526508598,
+            "r2": 0.9924454220511489,
+            "mape": 1.6058669082794401
+        },
+        "udds_hdt": {
+            "features": {
+                "mass": -1.0049812086518185e-07,
+                "drag_coef": -0.015070294370344467,
+                "accessory_load": -6.096390536868778e-07,
+                "inv_eff": 0.0672830723062669,
+                "mass drag_coef": 1.6185067085517238e-07,
+                "mass accessory_load": -2.0461811064964586e-11,
+                "mass inv_eff": 2.742244357567675e-06,
+                "drag_coef accessory_load": 5.941541967784342e-07,
+                "drag_coef inv_eff": 0.04037617414058824,
+                "accessory_load inv_eff": 5.340425597518102e-06
+            },
+            "intercept": 0.01531822830338686,
+            "r2": 0.9954088724850795,
+            "mape": 1.2598746031483468
+        }
+    }
+}

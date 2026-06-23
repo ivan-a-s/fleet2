@@ -21,10 +21,9 @@ from data import PARAMS
 
 SAMPLE_YEARS = [2025, 2030, 2035, 2040, 2045, 2050]
 
-PT_COLOR = {
-    'dice': '#606060', 'he':   '#8B6914', 'phe':  '#C8A000',
-    'be':   '#2255CC', 'fc':   '#228B44', 'hice': '#7755BB', 'dhice': '#DD6600',
-}
+_CYCLE   = plt.rcParams['axes.prop_cycle'].by_key()['color']
+PT_COLOR = {p: _CYCLE[i % len(_CYCLE)]
+            for i, p in enumerate(['dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'])}
 
 def _comp_colors(keys):
     cmap = plt.cm.tab20
@@ -38,7 +37,7 @@ def _bar_layout(n, year_gap=5, fill=0.80, internal_gap=0.10):
 def _stacked_bar(ax, x, comps, width, colors):
     bottom = 0.0
     for label in sorted(comps):
-        v = comps[label]
+        v = float(np.asarray(comps[label]).flat[0])   # age-0 scalar
         if v == 0:
             continue
         ax.bar(x, v, bottom=bottom, width=width, color=colors.get(label, 'gray'), label=label)
