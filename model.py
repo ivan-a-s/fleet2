@@ -674,7 +674,7 @@ class Fleet:
         self.years        = np.arange(START_YEAR, END_YEAR + 1)
         self.price_lambda = float(self.params['fleet']['price_lambda'])
 
-        # Activity requirement (km·t/year) by vehicle type and calendar year
+        # Activity requirement (t-km/year) by vehicle type and calendar year
         init_act   = float(self.params['fleet']['initial_activity'])
         act_growth = float(self.params['fleet']['activity_growth'])
         self.activity_req = {
@@ -710,8 +710,8 @@ class Fleet:
                                             × survival_rate[START_YEAR - y]
                                             / denom
 
-        denom = Σ_a  annual_distance[a] × survival_rate[a] × (1 + growth_rate)^(-a)
-        is the survival-and-growth-weighted activity per vehicle over a full MAX_AGE lifespan.
+        denom = Σ_a  annual_distance[a] × payload[a]/1000 × survival_rate[a] × (1 + growth_rate)^(-a)
+        is the survival-and-growth-weighted t-km per vehicle over a full MAX_AGE lifespan.
         Dividing by denom converts a total activity target into a number of vehicles per cohort.
 
         The oldest cohort (age MAX_AGE-1 at START_YEAR) is used as the denominator reference
@@ -724,7 +724,8 @@ class Fleet:
             # Fixed reference vehicle (oldest vintage) for denominator — matches old model
             v_ref   = self.vehicles[k, 'dice', START_YEAR - MAX_AGE]
             surv_r  = v_ref.params['survival_rate']
-            denom   = sum(v_ref.annual_distance[a] * float(surv_r[a]) * (1 + GROWTH_RATE) ** (-a)
+            denom   = sum(v_ref.annual_distance[a] * float(np.asarray(v_ref.mass['payload'])[a]) / 1000.0
+                          * float(surv_r[a]) * (1 + GROWTH_RATE) ** (-a)
                           for a in range(MAX_AGE))
 
             for y in range(START_YEAR - MAX_AGE + 1, START_YEAR):
@@ -777,12 +778,16 @@ class Fleet:
             for k in self.K:
                 self._calculate_market_share(k, t)
                 activity_met = sum(
-                    self.stock.get((k, p, y, t), 0.0) * self.vehicles[k, p, y].annual_distance[t - y]
+                    self.stock.get((k, p, y, t), 0.0)
+                    * self.vehicles[k, p, y].annual_distance[t - y]
+                    * float(np.asarray(self.vehicles[k, p, y].mass['payload'])[t - y]) / 1000.0
                     for p in self.P[k] for y in range(t - MAX_AGE + 1, t)
                     if (k, p, y) in self.vehicles
                 )
                 avg_activity = sum(
-                    self.vehicles[k, p, t].annual_distance[0] * self.market_share[k, p, t]
+                    self.vehicles[k, p, t].annual_distance[0]
+                    * float(np.asarray(self.vehicles[k, p, t].mass['payload'])[0]) / 1000.0
+                    * self.market_share[k, p, t]
                     for p in self.P[k]
                 )
                 new_sales = max((self.activity_req[k, t] - activity_met) / max(avg_activity, 1.0), 0.0)

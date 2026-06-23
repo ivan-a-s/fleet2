@@ -26,8 +26,7 @@ PT_COLOR = {p: _CYCLE[i % len(_CYCLE)]
             for i, p in enumerate(['dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'])}
 
 def _comp_colors(keys):
-    cmap = plt.cm.tab20
-    return {k: cmap(i / max(len(keys), 1)) for i, k in enumerate(sorted(keys))}
+    return {k: _CYCLE[i % len(_CYCLE)] for i, k in enumerate(sorted(keys))}
 
 def _bar_layout(n, year_gap=5, fill=0.80, internal_gap=0.10):
     width   = (year_gap * fill - (n - 1) * internal_gap) / max(n, 1)

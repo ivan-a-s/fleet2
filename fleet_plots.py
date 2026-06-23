@@ -20,30 +20,29 @@ import matplotlib.pyplot as plt
 from model import Fleet, get_uncertainty_distributions, START_YEAR, END_YEAR
 from data import PARAMS
 
-PT_COLOR = {
-    'dice': '#606060', 'he':    '#8B6914',
-    'be':   '#2255CC', 'fc':    '#228B44',
-    'hice': '#7755BB', 'dhice': '#DD6600',
+_CYCLE = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+PT_COLOR = {p: _CYCLE[i % len(_CYCLE)]
+            for i, p in enumerate(['dice', 'he', 'be', 'fc', 'hice', 'dhice'])}
+
+# MJ of useful (traction) energy per unit of fuel consumed.
+# Diesel/H2: LHV × powertrain efficiency. Electric: 3.6 MJ/kWh × drivetrain efficiency.
+# h2 efficiency uses FC (~60%); hice/dhice are a minor share so the error is small.
+FUEL_TO_MJ = {
+    'diesel':      35.8 * 0.43,   # L   → 15.4 MJ
+    'h2':         120.0 * 0.60,   # kg  → 72.0 MJ
+    'h2_p':       120.0 * 0.60,
+    'h2_pe':      120.0 * 0.60,
+    'slow_charge':  3.6 * 0.90,   # kWh →  3.2 MJ
+    'fast_charge':  3.6 * 0.90,
 }
-FUEL_COLOR = {
-    'diesel':      '#606060',
-    'slow_charge': '#2255CC',
-    'fast_charge': '#5599FF',
-    'h2':          '#228B44',
-    'h2_p':        '#66BB66',
-    'h2_pe':       '#99DDAA',
-}
-EMIS_COLOR = {
-    'Use':      '#606060',
-    'Supply':   '#2255CC',
-    'Embodied': '#CC8833',
-}
-COST_COLOR = {
-    'Capital':     '#AA3333',
-    'Operational': '#CC8833',
-    'Fuel':        '#2255CC',
-    'Driver':      '#AA66AA',
-}
+
+FUEL_COLOR = {f: _CYCLE[i % len(_CYCLE)]
+              for i, f in enumerate(['diesel', 'h2', 'h2_p', 'h2_pe', 'slow_charge', 'fast_charge'])}
+EMIS_COLOR = {e: _CYCLE[i % len(_CYCLE)]
+              for i, e in enumerate(['Use', 'Supply', 'Embodied'])}
+COST_COLOR = {c: _CYCLE[i % len(_CYCLE)]
+              for i, c in enumerate(['Capital', 'Operational', 'Fuel', 'Driver'])}
 
 
 # ---------------------------------------------------------------------------
@@ -85,15 +84,10 @@ def extract_outputs(fleet):
                 for p in fleet.P[k]
             } for k in fleet.K
         },
-        'Market Share': {
-            k: {
-                p: np.array([fleet.market_share.get((k, p, t), 0.0) for t in T])
-                for p in fleet.P[k]
-            } for k in fleet.K
-        },
         'Fuel Usage': {
             k: {
-                f: np.array([float(fleet.fuel_usage.get((k, f, t), 0.0)) for t in T]) / 1e6
+                f: np.array([float(fleet.fuel_usage.get((k, f, t), 0.0)) for t in T])
+                   * FUEL_TO_MJ.get(f, 1.0) / 1e6   # → TJ useful energy
                 for f in all_fuels
             } for k in fleet.K
         },
@@ -244,14 +238,9 @@ if __name__ == "__main__":
                    x_label='Year', y_label='New vehicles (thousands)',
                    color_map=PT_COLOR)
 
-    p.plot_by_both(outputs['Market Share'],
-                   title='Market share of new sales',
-                   x_label='Year', y_label='Share',
-                   color_map=PT_COLOR)
-
     p.plot_by_both(outputs['Fuel Usage'],
-                   title='Fleet fuel usage',
-                   x_label='Year', y_label='Fuel use (×10⁶ units / year)',
+                   title='Fleet useful energy demand',
+                   x_label='Year', y_label='Useful energy (TJ / year)',
                    color_map=FUEL_COLOR)
 
     plt.show()
