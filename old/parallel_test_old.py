@@ -991,7 +991,7 @@ class Plotting:
 
 SAVE = True
 if __name__ == "__main__":
-    n_runs = 10_000
+    n_runs = 100
     set_constant_params(params)
     drive_cycles = {k: DriveCycle(df['path'])
                     for k, df in params['Drive Cycles'].items()}

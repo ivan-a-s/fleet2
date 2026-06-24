@@ -9,7 +9,6 @@ To do:
    - Combine with improved fuel consumption calculation.
  - Altitude on FC/engine performance and air resistance.
  - Bring the policies into something less annoying.
- - Pyaload by drivecycle not vehicle type
 """
 # Library imports
 import numpy as np
@@ -215,7 +214,7 @@ class CarbonTax:
 
 class LCFS:
     def __init__(self, params=d.PARAMS, credit_price=0, start=0.183, end=0.76):
-        self.baseline_emissions = params['Fuels']['diesel']['Emissions Intensity']['Combustion'] + params['Fuels']['diesel']['Emissions Intensity']['Supply'] # kgCO2/L diesel
+        self.baseline_emissions = params['Fuels']['Diesel']['Emissions Intensity']['Combustion'] + params['Fuels']['Diesel']['Emissions Intensity']['Supply'] # kgCO2/L diesel
         self.baseline_fuel_consumption = {
             'Sleeper': 0.28977364,
             'Day Cab': 0.41699174,
@@ -326,9 +325,7 @@ class Vehicle:
         self.operation_years = np.array(self.A + self.y, dtype=int)
 
         # Initialise variables from params
-        # self.set_attributes(params)
-        self.__dict__.update(params)
-        params = None
+        self.set_attributes(params)
         if accelerated_retirement and p == 'D':
                 self.survival_rate = self.survival_rate * np.array([0.001 if (a >= 15 and (self.y + a) >= START_YEAR) else 1 for a in range(MAX_AGE)])
 
@@ -339,7 +336,7 @@ class Vehicle:
             self.gvwl_increase = 0
         self.mass = self.Mass(
             frame=self.frame_mass,
-            powertrain=0, # FIX
+            drivetrain=self.drivetrain_mass,
             ess=sum(self.ess_specific_mass[f] * self.fuel_capacity[f] for f in self.F), # hybrids?
             trailer=self.trailer_mass,
             average_payload=self.average_payload,
@@ -387,7 +384,7 @@ class Vehicle:
             embodied = self.Embodied( # Can calculate these above if I need multiple lines
                 frame=np.concatenate([[self.mass.frame * self.embodied], np.zeros(self.max_age-1)]).astype('float32'),
                 trailer=np.concatenate([[self.mass.trailer * self.embodied * self.trailers_per_truck], np.zeros(self.max_age-1)]).astype('float32'),
-                powertrain=np.concatenate([[self.mass.powertrain * self.embodied], np.zeros(self.max_age-1)]).astype('float32'),
+                drivetrain=np.concatenate([[self.mass.drivetrain * self.embodied], np.zeros(self.max_age-1)]).astype('float32'),
                 ess=np.concatenate([[sum(self.fuel_capacity[f] * self.ess_embodied[f] for f in self.F)], np.zeros(self.max_age-1)]).astype('float32'), # Battery replacements
             ),
             fuel_combustion = sum(self.annual_fuel[f] * get_series(self.fuels[f].emissions_intensity.combustion, self.fuels[f].years, self.operation_years) for f in self.F).astype('float32'),
@@ -440,7 +437,7 @@ class Vehicle:
     @dataclass
     class Mass:
         frame: float
-        powertrain: float
+        drivetrain: float
         ess: float
         trailer: float
         average_payload: float
@@ -450,7 +447,7 @@ class Vehicle:
     
         @property
         def unloaded(self):
-            return self.frame + self.powertrain + self.ess + self.trailer
+            return self.frame + self.drivetrain + self.ess + self.trailer
         
         @property
         def payload(self):
@@ -464,7 +461,7 @@ class Vehicle:
     class Embodied:
         frame: np.ndarray
         trailer: np.ndarray
-        powertrain: np.ndarray
+        drivetrain: np.ndarray
         ess: np.ndarray
 
         def __post_init__(self):
@@ -475,7 +472,7 @@ class Vehicle:
 
         @property
         def annual(self):  # Factor in survival rate.
-            return self.frame + self.trailer + self.powertrain + self.ess
+            return self.frame + self.trailer + self.drivetrain + self.ess
         
         @property
         def lca(self):
@@ -776,30 +773,21 @@ class Vehicle:
             plt.legend()
 
 
-def set_year(input_dict, year=START_YEAR, years=np.arange(START_YEAR-MAX_AGE, END_YEAR+1)):
-    if isinstance(input_dict, np.ndarray):
-        input_dict = input_dict[np.where(years == year)[0][0]]
-    elif isinstance(input_dict, dict):
-        for key, value in input_dict.items():
-            input_dict[key] = set_year(value, year, years)
-    return input_dict
-
 class Fleet:
     def __init__(self, params, uncertain_cps, drive_cycles,
             ctax=CarbonTax(), lcfs=LCFS(), autonomous_permits=AutonomousPermits(), zev_mandate=ZEVMandate(),
             pyrolysis=False, pyrolysis_elec=False, accelerated_retirement=False, foresight=True, gvwl_increase=False,
             break_mandate=0.0, zev_rebate=0.0):
-        # Make copy of parameters (to avoid modifying the original data)
         self.params = copy.deepcopy(params) # To avoid modifying the original data
-        del params
-        self.T = self.params['Years']['T']
-        self.Y = self.params['Years']['Y']
-        self.K = list(self.params['Vehicles'].keys())
-        self.P = {k: list(self.params['Vehicles'][k]['Powertrains']) for k in self.K}
+        self.T = params['Years']['T']
+        self.Y = params['Years']['Y']
+        self.K = list(params['Vehicles'].keys())
+        self.P = {k: list(params['Vehicles'][k]['Powertrains']) for k in self.K}
         self.activity_requirement = {(k, y):
             ACTIVIY_YEAR_0 * (1 + GROWTH_RATE) ** (y-START_YEAR) * self.params['Vehicles'][k]['Shared']['activity_proportion']
             for k in self.K for y in self.Y 
         }
+        del params
         self.zev_mandate=zev_mandate
 
         # Realise uncertainties
@@ -825,166 +813,155 @@ class Fleet:
         # Drive Cycles
         self.drive_cycles = drive_cycles
         self.drive_cycles_small = {key: {'average_moving_speed': self.drive_cycles[key].average_moving_speed} for key in self.drive_cycles.keys()}
-        # del self.drive_cycles
+        del self.drive_cycles
 
         # Create vehicles year-by-year to enable implicit behaviour
-        # self.stock = {
-        #     (k, p, y, t): np.float32(0)
-        #     for t in self.T
-        #     for y in range(t - MAX_AGE + 1, t+1)
-        #     for k in self.K
-        #     for p in self.P[k]
-        # }
-        # self.market_share = {
-        #     (k, p, t): 1 if p == 'D' else np.float32(0)
-        #     for t in self.T
-        #     for k in self.K
-        #     for p in self.P[k]
-        # }
-        # # Initial fleet
-        # self.vehicles = {}
-        # for k in self.K:
-        #     for p in self.P[k]:
-        #         for y in self.Y[self.Y <= START_YEAR]:
-        #             # Generate the parameters for that vehicle.
-        #             vehicle_params = self.params['Vehicles'][k]['Shared']
-        #             vehicle_params |= self.params['Vehicles'][k]['Powertrains'][p]
-        #             vehicle_params |= self.params['powertrains'][vehicle_params['powertrain']]
-        #             vehicle_params |= self.params['esss'][vehicle_params['ess']]
-        #             exclude = ['target_distance', 'drive_cycle', 'survival_rate']
-        #             for key, value in vehicle_params.items():
-        #                 if key not in exclude:
-        #                     vehicle_params[key] = set_year(value)
-        #             from pprint import pprint
-        #             pprint(vehicle_params)
-        #             self.vehicles[k, p, y] = Vehicle(
-        #                 params=self.params['Vehicles'][k]['Shared'] | self.params['Vehicles'][k]['Powertrains'][p],
-        #                 fuels={key: value for key, value in self.fuels.items() if key in self.params['Vehicles'][k]['Powertrains'][p]['fuel']},
-        #                 p_fuel=self.params['Vehicles'][k]['Powertrains'][p]['fuel'],
-        #                 drive_cycles=self.drive_cycles_small,
-        #                 costs=self.params['Vehicles'][k]['Costs'],
-        #                 k=k, p=p, y=y,
-        #                 ctax=ctax, lcfs=lcfs,
-        #                 autonomous_penetration=0,
-        #                 foresight=foresight, gvwl_increase=gvwl_increase, break_mandate=break_mandate, accelerated_retirement=accelerated_retirement,
-        #             )
-        # # Previous stock
-        # for k in self.K:
-        #     for y in range(START_YEAR-MAX_AGE+1, START_YEAR):
-        #         self.stock[k, 'D', y, START_YEAR] = self.activity_requirement[k,START_YEAR] * (1+GROWTH_RATE)**(y-START_YEAR) * self.vehicles[k, 'D', y].survival_rate[START_YEAR-y] / \
-        #             sum(self.vehicles[k, 'D', 2000].annual_activity[a] * self.vehicles[k, 'D', 2000].survival_rate[a] * (1+GROWTH_RATE)**(-a) for a in range(MAX_AGE))
-        #     lcfs.baseline_fuel_consumption[k] = self.vehicles[k, 'D', 2025].fuel_consumption['Diesel'][0]
+        self.stock = {
+            (k, p, y, t): np.float32(0)
+            for t in self.T
+            for y in range(t - MAX_AGE + 1, t+1)
+            for k in self.K
+            for p in self.P[k]
+        }
+        self.market_share = {
+            (k, p, t): 1 if p == 'D' else np.float32(0)
+            for t in self.T
+            for k in self.K
+            for p in self.P[k]
+        }
+        # Initial fleet
+        self.vehicles = {(k, p, y): 
+            Vehicle(
+                params=self.params['Vehicles'][k]['Shared'] | self.params['Vehicles'][k]['Powertrains'][p]['params'],
+                fuels={key: value for key, value in self.fuels.items() if key in self.params['Vehicles'][k]['Powertrains'][p]['fuel']},
+                p_fuel=self.params['Vehicles'][k]['Powertrains'][p]['fuel'],
+                drive_cycles=self.drive_cycles_small,
+                costs=self.params['Vehicles'][k]['Costs'],
+                k=k, p=p, y=y,
+                ctax=ctax, lcfs=lcfs,
+                autonomous_penetration=0,
+                foresight=foresight, gvwl_increase=gvwl_increase, break_mandate=break_mandate, accelerated_retirement=accelerated_retirement,
+            )
+            for k in self.K for p in self.P[k] for y in self.Y if y <= START_YEAR
+        }
+        # Previous stock
+        for k in self.K:
+            for y in range(START_YEAR-MAX_AGE+1, START_YEAR):
+                self.stock[k, 'D', y, START_YEAR] = self.activity_requirement[k,START_YEAR] * (1+GROWTH_RATE)**(y-START_YEAR) * self.vehicles[k, 'D', y].survival_rate[START_YEAR-y] / \
+                    sum(self.vehicles[k, 'D', 2000].annual_activity[a] * self.vehicles[k, 'D', 2000].survival_rate[a] * (1+GROWTH_RATE)**(-a) for a in range(MAX_AGE))
+            lcfs.baseline_fuel_consumption[k] = self.vehicles[k, 'D', 2025].fuel_consumption['Diesel'][0]
 
-        # # Year-by-year
-        # penalty = 0
-        # for t in self.T:
-        #     # Roll-over from previous years
-        #     if t > START_YEAR:
-        #         for k in self.K:
-        #             for p in self.P[k]:
-        #                 for y in range(t-MAX_AGE+1, t):
-        #                     self.stock[k,p,y,t] = self.stock[k,p,y,t-1] * self.vehicles[k,p,y].survival_rate[t-y] / self.vehicles[k,p,y].survival_rate[t-1-y]
-        #     # Create vehicles for this model year, t.
-        #     for k in self.K:
-        #         for p in self.P[k]:
-        #             self.vehicles[k,p,t] = Vehicle(
-        #                 params=self.params['Vehicles'][k]['Shared'] | self.params['Vehicles'][k]['Powertrains'][p]['params'],
-        #                 fuels={key: value for key, value in self.fuels.items() if key in self.params['Vehicles'][k]['Powertrains'][p]['fuel']},
-        #                 p_fuel=self.params['Vehicles'][k]['Powertrains'][p]['fuel'],
-        #                 drive_cycles=self.drive_cycles_small,
-        #                 costs=self.params['Vehicles'][k]['Costs'],
-        #                 k=k, p=p, y=t,
-        #                 ctax=ctax, lcfs=lcfs,
-        #                 autonomous_penetration=1/(1 + np.exp(-0.5*(t - self.params['autonomous_t50'])))*autonomous_permits.permits[p],
-        #                 foresight=foresight, gvwl_increase=gvwl_increase, break_mandate=break_mandate, accelerated_retirement=accelerated_retirement,
-        #                 zev_rebate=zev_rebate,
-        #             )
-        #     # Calculate the market-share for each vehicle type
-        #     N = 1
-        #     target = zev_mandate.targets[t==self.T][0]
-        #     if target != 0:
-        #         N = 100
-        #     penalty=0
-        #     temp=0
-        #     for n in range(N):
-        #         # Market shares
-        #         for k in self.K:
-        #             self.calculate_market_share(k, t)
-        #             # Activity requirements
-        #             average_vehicle_activity = np.sum([self.vehicles[k,p,t].annual_activity[0] * self.vehicles[k,p,t].market_share for p in self.P[k]])
-        #             activity_met = sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_activity[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t))
-        #             activity_shortfall = self.activity_requirement[k,t] - activity_met
-        #             new_purchases = activity_shortfall / average_vehicle_activity
-        #             for p in self.P[k]:
-        #                 self.stock[k,p,t,t] = (new_purchases * self.vehicles[k,p,t].market_share).astype('float32')
-        #         # ZEV mandate penalty
-        #         if target != 0:
-        #             p_zev = sum(self.stock[k,p,t,t] for k in self.K for p in ZEV_POWERTRAINS) \
-        #                 / sum(self.stock[k,p,t,t] for k in self.K for p in self.P[k])
-        #             penalty = penalty*0.5 + zev_mandate.penalty * np.max([0, (target - p_zev)/(1.0-p_zev)])*0.5
-        #             for k in self.K:
-        #                 for p in NON_ZEV_POWERTRAINS:
-        #                     self.vehicles[k,p,t].tco.zev_mandate = penalty
-        #                     self.vehicles[k,p,t].annual_cost.zev_mandate[0] = penalty
-        #                 for p in ZEV_POWERTRAINS:
-        #                     rebate = min([penalty, penalty * (1 - p_zev) / p_zev])
-        #                     self.vehicles[k,p,t].tco.zev_mandate = -rebate
-        #                     self.vehicles[k,p,t].annual_cost.zev_mandate[0] = -rebate
-        #             if abs(temp-penalty) < 1:
-        #                 break
-        #             if n > 50:
-        #                  raise ValueError("ZEV penalty failed to converge!")
-        #             temp = penalty
-        # self.total_stock = {
-        #     (k, p, t): sum(self.stock[k,p,y,t] for y in range(t-MAX_AGE+1, t+1)).astype('float32')
-        #     for k in self.K for p in self.P[k] for t in self.T
-        # }
-        # self.sales = {
-        #     (k, p, t): self.stock[k,p,t,t] for k in self.K for p in self.P[k] for t in self.T
-        # }
-        # # Fuel demand
-        # self.fuel_usage = {(k,f,t): np.float32(0.0) for k in self.K for f in self.fuels.keys() for t in self.T}
-        # self.energy_by_fuel = {(k,f,t): np.float32(0.0) for k in self.K for f in self.fuels.keys() for t in self.T}
-        # for t in self.T:
-        #     for f in self.fuels.keys():
-        #         for k in self.K:
-        #             for p in self.P[k]:
-        #                 if f in self.params['Vehicles'][k]['Powertrains'][p]['fuel']:
-        #                     self.fuel_usage[k,f,t] += sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_fuel[f][t-y] / self.fuels[f].recharge_efficiency for y in range(t-MAX_AGE+1, t+1)).astype('float32')
-        #                     self.energy_by_fuel[k,f,t] += sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].energy_consumption[t-y] * self.vehicles[k,p,y].annual_distance[t-y] * self.vehicles[k,p,y].p_fuel[f][t-y] for y in range(t-MAX_AGE+1, t+1)).astype('float32')
-        # self.calculate_emissions()
-        # self.system_costs = {}
-        # for k in self.K:
-        #     self.system_costs[k] = self.SystemCosts(
-        #         capital=np.array([sum(self.stock[k,p,t,t] * self.vehicles[k,p,t].capital.total for p in self.P[k]) for t in self.T]).astype('float32'),
-        #         fuel=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_fuel[f][t-y] * self.fuels[f].cost.fuel[t-self.Y[0]] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1) for f in self.vehicles[k,p,y].annual_fuel.keys()) for t in self.T]).astype('float32'),
-        #         operational=np.array([sum(self.stock[k,p,y,t] * (self.vehicles[k,p,y].annual_cost.operational[t-y]+self.vehicles[k,p,y].annual_cost.fc_replacements[t-y]) for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
-        #         driver=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.driver[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
-        #     )
-        # self.policy_costs = {}
-        # for k in self.K:
-        #     self.policy_costs[k] = {
-        #         'carbon_tax': np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.carbon_tax[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
-        #         'lcfs': np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.lcfs[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
-        #         'zev_mandate': np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.zev_mandate[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
-        #         'zev_rebate': np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.zev_rebate[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
-        #     }
-        # self.average_external = self.ExternalCosts(
-        #     accidents=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.156 * 1.8361 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
-        #     air_pollution=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_fuel[f][t-y] * self.vehicles[k,p,y].fuels[f].air_pollution[x]/1e6 * self.vehicles[k,p,y].pollution_cost[x] for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1) for x in self.vehicles[k,p,y].pollution_cost.keys() for f in self.vehicles[k,p,y].fuels.keys()) for t in self.T]),
-        #     ghg_emissions=np.array([sum(self.emissions[k].total[t==self.T])/1000 * SOCIAL_COST_OF_CARBON_0 * (1 + 0.03) ** (t - START_YEAR) for t in self.T]),
-        #     noise=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.03 * 1.8361 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
-        #     congestion=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * (0.0115 if k=='Sleeper' else 0.4116 if k=='Class-8 Straight' else 0.0915) for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
-        #     habitat_loss=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.075 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
-        # )
-        # self.marginal_external = self.ExternalCosts(
-        #     accidents=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.4002 * 1.8361 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
-        #     air_pollution=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_fuel[f][t-y] * self.vehicles[k,p,y].fuels[f].air_pollution[x]/1e6 * self.vehicles[k,p,y].pollution_cost[x] for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1) for x in self.vehicles[k,p,y].pollution_cost.keys() for f in self.vehicles[k,p,y].fuels.keys()) for t in self.T]),
-        #     ghg_emissions=np.array([sum(self.emissions[k].total[t==self.T])/1000 * SOCIAL_COST_OF_CARBON_0 * (1 + 0.03) ** (t - START_YEAR) for t in self.T]),
-        #     noise=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.03 * 1.8361 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
-        #     congestion=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * (0.347 if k=='Sleeper' else 1.023 if k=='Class-8 Straight' else (0.347+1.023)/2) for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
-        #     habitat_loss=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.075 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
-        # )
+        # Year-by-year
+        penalty = 0
+        for t in self.T:
+            # Roll-over from previous years
+            if t > START_YEAR:
+                for k in self.K:
+                    for p in self.P[k]:
+                        for y in range(t-MAX_AGE+1, t):
+                            self.stock[k,p,y,t] = self.stock[k,p,y,t-1] * self.vehicles[k,p,y].survival_rate[t-y] / self.vehicles[k,p,y].survival_rate[t-1-y]
+            # Create vehicles for this model year, t.
+            for k in self.K:
+                for p in self.P[k]:
+                    self.vehicles[k,p,t] = Vehicle(
+                        params=self.params['Vehicles'][k]['Shared'] | self.params['Vehicles'][k]['Powertrains'][p]['params'],
+                        fuels={key: value for key, value in self.fuels.items() if key in self.params['Vehicles'][k]['Powertrains'][p]['fuel']},
+                        p_fuel=self.params['Vehicles'][k]['Powertrains'][p]['fuel'],
+                        drive_cycles=self.drive_cycles_small,
+                        costs=self.params['Vehicles'][k]['Costs'],
+                        k=k, p=p, y=t,
+                        ctax=ctax, lcfs=lcfs,
+                        autonomous_penetration=1/(1 + np.exp(-0.5*(t - self.params['autonomous_t50'])))*autonomous_permits.permits[p],
+                        foresight=foresight, gvwl_increase=gvwl_increase, break_mandate=break_mandate, accelerated_retirement=accelerated_retirement,
+                        zev_rebate=zev_rebate,
+                    )
+            # Calculate the market-share for each vehicle type
+            N = 1
+            target = zev_mandate.targets[t==self.T][0]
+            if target != 0:
+                N = 100
+            penalty=0
+            temp=0
+            for n in range(N):
+                # Market shares
+                for k in self.K:
+                    self.calculate_market_share(k, t)
+                    # Activity requirements
+                    average_vehicle_activity = np.sum([self.vehicles[k,p,t].annual_activity[0] * self.vehicles[k,p,t].market_share for p in self.P[k]])
+                    activity_met = sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_activity[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t))
+                    activity_shortfall = self.activity_requirement[k,t] - activity_met
+                    new_purchases = activity_shortfall / average_vehicle_activity
+                    for p in self.P[k]:
+                        self.stock[k,p,t,t] = (new_purchases * self.vehicles[k,p,t].market_share).astype('float32')
+                # ZEV mandate penalty
+                if target != 0:
+                    p_zev = sum(self.stock[k,p,t,t] for k in self.K for p in ZEV_POWERTRAINS) \
+                        / sum(self.stock[k,p,t,t] for k in self.K for p in self.P[k])
+                    penalty = penalty*0.5 + zev_mandate.penalty * np.max([0, (target - p_zev)/(1.0-p_zev)])*0.5
+                    for k in self.K:
+                        for p in NON_ZEV_POWERTRAINS:
+                            self.vehicles[k,p,t].tco.zev_mandate = penalty
+                            self.vehicles[k,p,t].annual_cost.zev_mandate[0] = penalty
+                        for p in ZEV_POWERTRAINS:
+                            rebate = min([penalty, penalty * (1 - p_zev) / p_zev])
+                            self.vehicles[k,p,t].tco.zev_mandate = -rebate
+                            self.vehicles[k,p,t].annual_cost.zev_mandate[0] = -rebate
+                    if abs(temp-penalty) < 1:
+                        break
+                    if n > 50:
+                         raise ValueError("ZEV penalty failed to converge!")
+                    temp = penalty
+        self.total_stock = {
+            (k, p, t): sum(self.stock[k,p,y,t] for y in range(t-MAX_AGE+1, t+1)).astype('float32')
+            for k in self.K for p in self.P[k] for t in self.T
+        }
+        self.sales = {
+            (k, p, t): self.stock[k,p,t,t] for k in self.K for p in self.P[k] for t in self.T
+        }
+        # Fuel demand
+        self.fuel_usage = {(k,f,t): np.float32(0.0) for k in self.K for f in self.fuels.keys() for t in self.T}
+        self.energy_by_fuel = {(k,f,t): np.float32(0.0) for k in self.K for f in self.fuels.keys() for t in self.T}
+        for t in self.T:
+            for f in self.fuels.keys():
+                for k in self.K:
+                    for p in self.P[k]:
+                        if f in self.params['Vehicles'][k]['Powertrains'][p]['fuel']:
+                            self.fuel_usage[k,f,t] += sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_fuel[f][t-y] / self.fuels[f].recharge_efficiency for y in range(t-MAX_AGE+1, t+1)).astype('float32')
+                            self.energy_by_fuel[k,f,t] += sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].energy_consumption[t-y] * self.vehicles[k,p,y].annual_distance[t-y] * self.vehicles[k,p,y].p_fuel[f][t-y] for y in range(t-MAX_AGE+1, t+1)).astype('float32')
+        self.calculate_emissions()
+        self.system_costs = {}
+        for k in self.K:
+            self.system_costs[k] = self.SystemCosts(
+                capital=np.array([sum(self.stock[k,p,t,t] * self.vehicles[k,p,t].capital.total for p in self.P[k]) for t in self.T]).astype('float32'),
+                fuel=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_fuel[f][t-y] * self.fuels[f].cost.fuel[t-self.Y[0]] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1) for f in self.vehicles[k,p,y].annual_fuel.keys()) for t in self.T]).astype('float32'),
+                operational=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.operational[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1))
+                                      + sum(self.stock[k,'FC',y,t] * self.vehicles[k,'FC',y].fc_replacements[t-y] * self.vehicles[k,'FC',y].fc_size * self.vehicles[k,'FC',y].costs['fc'][t-self.Y[0]] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
+                driver=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.driver[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
+            )
+        self.policy_costs = {}
+        for k in self.K:
+            self.policy_costs[k] = {
+                'carbon_tax': np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.carbon_tax[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
+                'lcfs': np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.lcfs[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
+                'zev_mandate': np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.zev_mandate[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
+                'zev_rebate': np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_cost.zev_rebate[t-y] for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]).astype('float32'),
+            }
+        self.average_external = self.ExternalCosts(
+            accidents=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.156 * 1.8361 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
+            air_pollution=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_fuel[f][t-y] * self.vehicles[k,p,y].fuels[f].air_pollution[x]/1e6 * self.vehicles[k,p,y].pollution_cost[x] for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1) for x in self.vehicles[k,p,y].pollution_cost.keys() for f in self.vehicles[k,p,y].fuels.keys()) for t in self.T]),
+            ghg_emissions=np.array([sum(self.emissions[k].total[t==self.T])/1000 * SOCIAL_COST_OF_CARBON_0 * (1 + 0.03) ** (t - START_YEAR) for t in self.T]),
+            noise=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.03 * 1.8361 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
+            congestion=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * (0.0115 if k=='Sleeper' else 0.4116 if k=='Class-8 Straight' else 0.0915) for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
+            habitat_loss=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.075 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
+        )
+        self.marginal_external = self.ExternalCosts(
+            accidents=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.4002 * 1.8361 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
+            air_pollution=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_fuel[f][t-y] * self.vehicles[k,p,y].fuels[f].air_pollution[x]/1e6 * self.vehicles[k,p,y].pollution_cost[x] for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1) for x in self.vehicles[k,p,y].pollution_cost.keys() for f in self.vehicles[k,p,y].fuels.keys()) for t in self.T]),
+            ghg_emissions=np.array([sum(self.emissions[k].total[t==self.T])/1000 * SOCIAL_COST_OF_CARBON_0 * (1 + 0.03) ** (t - START_YEAR) for t in self.T]),
+            noise=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.03 * 1.8361 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
+            congestion=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * (0.347 if k=='Sleeper' else 1.023 if k=='Class-8 Straight' else (0.347+1.023)/2) for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
+            habitat_loss=np.array([sum(self.stock[k,p,y,t] * self.vehicles[k,p,y].annual_distance[t-y] * 0.075 for k in self.K for p in self.P[k] for y in range(t-MAX_AGE+1, t+1)) for t in self.T]),
+        )
         # Plotting
         # self.plots = self.Plots(self)
 
@@ -1094,10 +1071,10 @@ class Fleet:
                         offset = np.argwhere(np.array(self.fleet.P[k]) == p).flatten()[0] * (width + gap) - (width + gap) * (len(self.fleet.P[k]) - 1) / 2
                         m = self.fleet.vehicles[k,p,y].mass
                         plt.bar(y + offset, m.frame, width=width)
-                        plt.bar(y + offset, m.powertrain, bottom=m.frame, width=width)
-                        plt.bar(y + offset, m.ess, bottom=m.frame+m.powertrain, width=width)
-                        plt.bar(y + offset, m.trailer, bottom=m.frame+m.powertrain+m.ess, width=width)
-                        plt.bar(y + offset, m.payload, bottom=m.frame+m.powertrain+m.ess+m.trailer, width=width)
+                        plt.bar(y + offset, m.drivetrain, bottom=m.frame, width=width)
+                        plt.bar(y + offset, m.ess, bottom=m.frame+m.drivetrain, width=width)
+                        plt.bar(y + offset, m.trailer, bottom=m.frame+m.drivetrain+m.ess, width=width)
+                        plt.bar(y + offset, m.payload, bottom=m.frame+m.drivetrain+m.ess+m.trailer, width=width)
                         plt.text(y + offset, m.total*1.01, p, ha='center', va='bottom', fontsize=8, rotation=90)
                 plt.ylim(0, plt.ylim()[1]*1.3) 
                 plt.legend(['Frame', 'Drivetrain', 'ESS', 'Trailer', 'Payload'])
@@ -1364,6 +1341,6 @@ if __name__ == "__main__":
     # plots.annual_distance()
     # plots.stock()
     # plots.npv()
-    # plots.sales()
+    plots.sales()
 
 
