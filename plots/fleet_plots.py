@@ -15,15 +15,33 @@ merge_outputs(list_of_dicts) — stacks a list of single-run dicts into MC array
 
 Run directly to show all plots for a single deterministic run.
 """
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from model import Fleet, get_uncertainty_distributions, START_YEAR, END_YEAR
 from data import PARAMS
 
 _CYCLE = plt.rcParams['axes.prop_cycle'].by_key()['color']
+plt.rcParams.update({'font.size': 12, 'axes.titlesize': 13, 'axes.labelsize': 12,
+                     'xtick.labelsize': 11, 'ytick.labelsize': 11})
 
 PT_COLOR = {p: _CYCLE[i % len(_CYCLE)]
             for i, p in enumerate(['dice', 'he', 'be', 'fc', 'hice', 'dhice'])}
+
+DISPLAY_LABELS = {
+    'dice':     'DICE',
+    'he':       'HE',
+    'phe':      'PHE',
+    'be':       'BE',
+    'fc':       'FC',
+    'hice':     'HICE',
+    'dhice':    'DHICE',
+    'sleeper':  'Sleeper',
+    'day_cab':  'Day Cab',
+    'straight': 'Straight',
+}
 
 # MJ of useful (traction) energy per unit of fuel consumed.
 # Diesel/H2: LHV × powertrain efficiency. Electric: 3.6 MJ/kWh × drivetrain efficiency.
@@ -37,8 +55,14 @@ FUEL_TO_MJ = {
     'fast_charge':  3.6 * 0.90,
 }
 
-FUEL_COLOR = {f: _CYCLE[i % len(_CYCLE)]
-              for i, f in enumerate(['diesel', 'h2', 'h2_p', 'h2_pe', 'slow_charge', 'fast_charge'])}
+FUEL_COLOR = {
+    'diesel':      PT_COLOR['dice'],
+    'slow_charge': PT_COLOR['be'],
+    'fast_charge': _CYCLE[6 % len(_CYCLE)],
+    'h2':          PT_COLOR['fc'],
+    'h2_p':        PT_COLOR['hice'],
+    'h2_pe':       PT_COLOR['dhice'],
+}
 EMIS_COLOR = {e: _CYCLE[i % len(_CYCLE)]
               for i, e in enumerate(['Use', 'Supply', 'Embodied'])}
 COST_COLOR = {c: _CYCLE[i % len(_CYCLE)]
@@ -136,13 +160,13 @@ class Plotting:
             v   = np.asarray(v, dtype=float)
             col = (color_map or {}).get(k)
             if v.ndim == 1:
-                ax.plot(t, v, label=k, color=col)
+                ax.plot(t, v, label=DISPLAY_LABELS.get(k, k), color=col)
                 local_max = max(local_max, v.max() if v.size else 0)
             else:
                 p5, p95 = np.percentile(v, [5, 95], axis=0)
                 mean    = np.mean(v, axis=0)
                 ax.fill_between(t, p5, p95, alpha=0.2, color=col)
-                ax.plot(t, mean, label=k, color=col)
+                ax.plot(t, mean, label=DISPLAY_LABELS.get(k, k), color=col)
                 local_max = max(local_max, float(p95.max()))
 
         if add_total:
@@ -178,7 +202,7 @@ class Plotting:
             local_max = self.plot_lines(self.T, subdict, ax, x_label, y_label,
                                         add_total, color_map)
             global_max = max(global_max, local_max)
-            ax.set_title(k)
+            ax.set_title(DISPLAY_LABELS.get(k, k))
             for h, l in zip(*ax.get_legend_handles_labels()):
                 if l not in all_labels:
                     all_handles.append(h); all_labels.append(l)

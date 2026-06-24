@@ -174,11 +174,33 @@
                     }
                 },
                 "motor": {
-                    "mass": 1183,
-                    "efficiency": 0.875
+                    "he": {
+                        "mass": 104,
+                        "efficiency": 0.875
+                    },
+                    "hice": {
+                        "mass": 104,
+                        "efficiency": 0.875
+                    },
+                    "fc": {
+                        "mass": 610,
+                        "efficiency": 0.875
+                    },
+                    "be": {
+                        "mass": 537,
+                        "efficiency": 0.875
+                    }
                 },
                 "electronic_controller": {
-                    "mass": 537
+                    "be": {
+                        "mass": 57
+                    },
+                    "fc": {
+                        "mass": 64
+                    },
+                    "he": {
+                        "mass": 11
+                    }
                 },
                 "fc": {
                     "mass": 625,
@@ -390,8 +412,7 @@
                             "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
-                            "diesel":      {"proportion": 0.999},
-                            "slow_charge": {"proportion": 0.001}
+                            "diesel": {"proportion": 1.0}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -425,8 +446,7 @@
                             "electric_transmission": {"type": "transmission"}
                         },
                         "fuels": {
-                            "h2":          {"proportion": 0.999},
-                            "slow_charge": {"proportion": 0.001}
+                            "h2": {"proportion": 1.0}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -438,12 +458,14 @@
                     "hice": {
                         "components": {
                             "ice":                     {"type": "converter"},
+                            "motor":                   {"type": "converter",    "capacity": 220},
                             "h2_700bar":               {"type": "ess",          "capacity": 90},
+                            "battery":                 {"type": "ess",          "capacity": 10},
                             "combustion_transmission": {"type": "transmission"}
                         },
                         "fuels": {"h2": {"proportion": 1.0}},
-                        "regen_efficiency": 0.0,
-                        "accessory_load": 4250,
+                        "regen_efficiency": 0.71,
+                        "accessory_load": 3400,
                         "running_cost": 0.17,
                         "init_market_limit": 0.02,
                         "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
@@ -539,8 +561,7 @@
                             "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
-                            "diesel":      {"proportion": 0.999},
-                            "slow_charge": {"proportion": 0.001}
+                            "diesel": {"proportion": 1.0}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -574,8 +595,7 @@
                             "electric_transmission": {"type": "transmission"}
                         },
                         "fuels": {
-                            "h2":          {"proportion": 0.999},
-                            "slow_charge": {"proportion": 0.001}
+                            "h2": {"proportion": 1.0}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -587,12 +607,14 @@
                     "hice": {
                         "components": {
                             "ice":                     {"type": "converter"},
+                            "motor":                   {"type": "converter",    "capacity": 220},
                             "h2_350bar":               {"type": "ess",          "capacity": 70},
+                            "battery":                 {"type": "ess",          "capacity": 5},
                             "combustion_transmission": {"type": "transmission"}
                         },
                         "fuels": {"h2": {"proportion": 1.0}},
-                        "regen_efficiency": 0.0,
-                        "accessory_load": 4250,
+                        "regen_efficiency": 0.71,
+                        "accessory_load": 3400,
                         "running_cost": 0.17,
                         "init_market_limit": 0.02,
                         "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
@@ -682,8 +704,7 @@
                             "after_treatment":         {"type": "accessories"}
                         },
                         "fuels": {
-                            "diesel":      {"proportion": 0.999},
-                            "slow_charge": {"proportion": 0.001}
+                            "diesel": {"proportion": 1.0}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -717,8 +738,7 @@
                             "electric_transmission": {"type": "transmission"}
                         },
                         "fuels": {
-                            "h2":          {"proportion": 0.999},
-                            "slow_charge": {"proportion": 0.001}
+                            "h2": {"proportion": 1.0}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,
@@ -730,11 +750,13 @@
                     "hice": {
                         "components": {
                             "ice":                     {"type": "converter"},
+                            "motor":                   {"type": "converter",    "capacity": 220},
                             "h2_350bar":               {"type": "ess",          "capacity": 50},
+                            "battery":                 {"type": "ess",          "capacity": 5},
                             "combustion_transmission": {"type": "transmission"}
                         },
                         "fuels": {"h2": {"proportion": 1.0}},
-                        "regen_efficiency": 0.0,
+                        "regen_efficiency": 0.71,
                         "accessory_load": 3400,
                         "running_cost": 0.17,
                         "init_market_limit": 0.02,

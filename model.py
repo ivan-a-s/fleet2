@@ -21,7 +21,9 @@ To do:
  - Size vehicle components for NPV optimisation?
  - Altitude on FC/engine performance and air resistance.
  - Make scrappage/usage decisions for vehicles?
-
+ - Make sure I am happy with the accessory load and how efficiency is applied.
+ - Add a resource-haul vehicle type.
+ 
  Checked up to:
   - _calculate_fuel_consumption
 """
@@ -63,9 +65,9 @@ def estimate_fuel_consumption(input_data, model_params):
     return total
 
 # Surrogate model mappings
-# hice/dhice reuse diesel-engine surrogates; all other powertrains match by name
+# hice/dhice reuse he_parallel surrogate; all other powertrains match by name
 SURROGATE_NAME = {
-    'hice': 'dice',
+    'hice': 'he',
     'dhice': 'he',
 }
 # Which component efficiency to pass as peak_eff to the surrogate
@@ -77,6 +79,7 @@ EFF_COMPONENT = {
 ZEV_POWERTRAINS     = {'be', 'fc', 'hice'}
 HICE_POWERTRAINS    = {'hice', 'dhice'}
 CHARGER_POWERTRAINS = {'be'}
+ALL_POWERTRAINS     = frozenset({'dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'})
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +410,8 @@ class Vehicles:
 
         for a in self.age:
             # Battery range degradation (1% per year of age + 0.01% per charge cycle)
-            if battery_fuel and battery_fuel in self.fuel_consumption:
+            if (battery_fuel and battery_fuel in self.fuel_consumption
+                    and self.fuel_consumption[battery_fuel][a] > 0):
                 range_[a] = self.range[a] * max(0.0, 1.0 - deg_per_year * a - deg_per_cycle * cycles)
 
             if daily_target[a] <= range_[a]:
@@ -431,7 +435,8 @@ class Vehicles:
             self.annual_distance[a]   = daily      * 5.0 / 7.0 * 365.0
             self._enroute_distance[a] = achievable * 5.0 / 7.0 * 365.0
 
-            if battery_fuel and battery_cap > 0:
+            if (battery_fuel and battery_cap > 0
+                    and self.fuel_consumption[battery_fuel][a] > 0):
                 cycles += (self.annual_distance[a]
                            * self.fuel_consumption[battery_fuel][a] / battery_cap)
 
@@ -440,6 +445,20 @@ class Vehicles:
             f: self.annual_distance * self.fuel_consumption[f]
             for f in self.fuel_consumption
         }
+
+        # Split slow_charge into depot (slow) + en-route (fast) portions.
+        # Mirrors the cost split in _calculate_annual_cost so fuel_usage and
+        # emissions both reflect which charger type delivered the energy.
+        if battery_fuel == 'slow_charge' and np.any(self._enroute_distance > 0):
+            slow_eff    = float(self.fuels[battery_fuel].get('refuel_efficiency', 1.0))
+            fast_data   = self._all_fuels.get('fast_charge', {})
+            fast_eff    = float(fast_data.get('refuel_efficiency', slow_eff))
+            fc_per_km   = self.fuel_consumption[battery_fuel]
+            enroute_kwh = self._enroute_distance * fc_per_km * slow_eff / fast_eff
+            self.annual_fuel[battery_fuel] = self.annual_fuel[battery_fuel] - enroute_kwh
+            self.annual_fuel['fast_charge'] = enroute_kwh
+            if 'fast_charge' not in self.fuels and fast_data:
+                self.fuels['fast_charge'] = fast_data
 
     # -- FC replacements -------------------------------------------------------
 
@@ -900,6 +919,8 @@ class Fleet:
         vehicle_params |= copy.deepcopy(self.params['vehicles']['types'][k]['powertrains'][p])
         for comp_name, comp in list(vehicle_params['components'].items()):
             shared_def = copy.deepcopy(self.params['vehicles']['components'][comp['type']][comp_name])
+            if isinstance(shared_def, dict) and any(k in ALL_POWERTRAINS for k in shared_def):
+                shared_def = shared_def.get(p, {})
             comp.update({kk: v for kk, v in shared_def.items() if kk not in comp})
         vehicle_params['model_year'] = y
         exclude = {'target_distance', 'drive_cycle', 'survival_rate', 'average_speed', 'payload'}
