@@ -19,8 +19,10 @@ powertrains that contain that component, rather than sampled independently.
 | `data.json` | All parameters. No Python expressions — arrays use `{"array": ...}` specs |
 | `data.py` | Thin loader: reads JSON, expands array specs to numpy, exports module-level constants |
 | `model.py` | `Vehicles` and `Fleet` classes; main entry point |
-| `fuel_consumption.py` | FASTSim surrogate training code — **not imported by model.py** |
-| `drive_cycles/*.json` | Surrogate coefficients per (powertrain, drive_cycle) used for inference |
+| `vehicle_modelling/fuel_consumption.py` | FASTSim surrogate training code — **not imported by model.py** |
+| `vehicle_modelling/surrogates.json` | Surrogate coefficients per (powertrain, drive_cycle) used for inference |
+| `plots/vehicle_plots.py` | Per-cohort sanity-check plots (mass, FC, TCO, emissions, etc.) |
+| `plots/fleet_plots.py` | Fleet-level line plots (stock, sales, fuel use, emissions, costs) |
 
 ## Running
 
@@ -44,6 +46,7 @@ C:\Users\ivana\anaconda3\python.exe model.py
 - [x] `Fleet._run()` — complete: year-by-year roll-over, vehicle creation, market share, new purchases
 - [x] `Fleet._calculate_market_share()` — complete: multinomial logit + iterative production cap
 - [x] `Fleet._aggregate()` — complete: total_stock, sales, fuel_usage, emissions, system_costs
+- [x] `plots/vehicle_plots.py` — per-cohort sanity checks; `plots/fleet_plots.py` — fleet-level line plots
 - [ ] Physical plausibility check — total mass 28.9 t for sleeper diesel seems low (expect ~36-40 t loaded); payload calculation may need review
 - [ ] Monte Carlo runner (`run.py`) — not yet written
 - [ ] Policies (carbon tax, LCFS, ZEV mandate) — not yet implemented
@@ -55,18 +58,21 @@ Helper functions:   load_model_params, estimate_fuel_consumption,
                     get_uncertainty_distributions, set_param_, set_param,
                     convert_to_float32, set_year
 
-Module constants:   SURROGATE_NAME, PHE_DC_MAP, EFF_COMPONENT,
+Module constants:   _SURROGATES (loaded from vehicle_modelling/surrogates.json),
+                    SURROGATE_NAME, EFF_COMPONENT,
                     ZEV_POWERTRAINS, HICE_POWERTRAINS,
-                    AFTERTREATMENT_POWERTRAINS, CHARGER_POWERTRAINS
+                    CHARGER_POWERTRAINS, ALL_POWERTRAINS
 
 Vehicles class:     _calculate_mass, _calculate_fuel_consumption,
                     _split_surrogate_output, _calculate_range,
                     _calculate_annual_distance, _track_fc_replacements,
-                    _calculate_emissions, _calculate_capital_cost,
-                    _calculate_annual_cost, _discount, _calculate_tco_npv
+                    _calculate_emissions, _cap_cost, _op_cost_array,
+                    _calculate_capital_cost, _calculate_annual_cost,
+                    _discount, _calculate_tco_npv
 
-Fleet class:        _build_initial_stock, _run, _calculate_market_share,
-                    _aggregate, select_vehicle_params, realise_uncertainties
+Fleet class:        _make_vehicle, _build_initial_stock, _run,
+                    _calculate_market_share, _aggregate,
+                    select_vehicle_params, realise_uncertainties
 
 Module function:    _market_share_limit (production cap helper)
 ```
@@ -77,7 +83,8 @@ Module function:    _market_share_limit (production cap helper)
 - `fleet`: initial_activity, activity_growth=0.02, price_lambda=0.00003, autonomous_t50=2040
 - `vehicles.components`: shared component defs (`converter`, `ess`, `transmission`) — each powertrain references these by type to avoid independent MC draws
 - Per-powertrain: `init_market_limit` (1.0 for dice, 0.02 for others), `cagr_nacent`, `cagr_mature`
-- Surrogate mapping: `hice`/`dhice` reuse `dice`/`he_parallel` surrogates; `phe_parallel` only has `udds_hdt`/`cruise_hdt` (no haul-specific files)
+- Surrogate mapping: both `hice` and `dhice` reuse the `he` surrogate (all 5 drive cycles); `phe` only has `udds_hdt`/`cruise_hdt` (no haul-specific files)
+- `hice` is modelled as a hybridised H2 ICE: motor (220 kW), battery (10/5/5 kWh), regen_efficiency=0.71, accessory_load=3400 — mirrors `he` component set with H2 tank instead of diesel tank
 
 ## Next steps
 
