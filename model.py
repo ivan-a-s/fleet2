@@ -23,6 +23,11 @@ To do:
  - Make scrappage/usage decisions for vehicles?
  - Make sure I am happy with the accessory load and how efficiency is applied.
  - Add a resource-haul vehicle type.
+ - Make sure powertrain embodied emissions are measured.
+ - Check cost of HICE engine.
+ - Add PHEs and give them a quarter of a charger each.
+ - Adjust the activity requrements and fuel consumption calculations
+   given the payload changes.
  
  Checked up to:
   - _calculate_fuel_consumption
@@ -316,17 +321,17 @@ class Vehicles:
         Compute per-age range (km) as the binding energy-storage constraint across all ESS
         components, and set self.refuel_rate for use in the daily-distance loop.
 
-        Range per ESS = capacity × usable_fraction / fuel_consumption_rate  [km]
-        where fuel_consumption is in source units/km (post efficiency correction).
-        The binding range is the minimum across all ESS (e.g. diesel tank on a DHICE).
+        Range per ESS = capacity × usable_fraction / fc_tank  [km]
+        where fc_tank = fuel_consumption (source units/km) × refuel_efficiency converts back
+        to tank/battery units (kWh, kg, L) so that capacity and FC are in commensurable units.
+        refuel_efficiency is only relevant to charging losses, not to how far the stored
+        energy propels the vehicle.  The binding range is the minimum across all ESS.
 
-        self.refuel_rate is the effective en-route replenishment rate in the same units
-        as fc × speed (energy/hr), used in the time-budget formula in _calculate_annual_distance.
-        For H2 tanks it is the pump flow rate (kg/hr).
-        For batteries it is the fast-charger wall power × efficiency ratio:
-          refuel_rate (kW wall) × fast_eff / slow_eff
-        The slow_eff division corrects for fuel_consumption being in wall-plug slow-charge
-        basis rather than battery basis, keeping the units commensurable.
+        self.refuel_rate and self._binding_fuel belong to the ESS that set the minimum range
+        (the constraining tank/battery), so they are always paired with the correct FC in the
+        time-budget formula in _calculate_annual_distance.
+        For H2 tanks: pump flow rate (kg/hr).
+        For batteries: fast-charger wall power × fast_eff = kW delivered to battery.
         """
         battery_fuel = next((f for f in self.fuels if 'charge' in f), None)
         ESS_FUEL = {
@@ -335,8 +340,9 @@ class Vehicles:
             'h2_350bar':   'h2',
             'battery':     battery_fuel,
         }
-        self.range       = np.full(len(self.age), 1e6)
-        self.refuel_rate = 0.0
+        self.range         = np.full(len(self.age), 1e6)
+        self.refuel_rate   = 0.0
+        self._binding_fuel = next(iter(self.fuel_consumption), None)
 
         for comp_name, comp in self.params['components'].items():
             if comp['type'] != 'ess':
@@ -348,22 +354,22 @@ class Vehicles:
             if np.all(fc == 0):
                 continue
             fc[fc == 0] = 1e-9
-            r = float(comp['capacity']) * float(comp['usable_capacity']) / fc
+            refuel_eff = float(self.fuels[f].get('refuel_efficiency', 1.0))
+            r = float(comp['capacity']) * float(comp['usable_capacity']) / (fc * refuel_eff)
+            prev = self.range.copy()
             self.range = np.minimum(self.range, r)
             if comp_name == 'battery':
-                # Battery refuel_rate is kW wall power; apply efficiency ratio to convert
-                # to wall-plug slow-charge basis (commensurable with fuel_consumption units)
                 rate_raw = float(comp['refuel_rate'])
                 if rate_raw > 0 and battery_fuel:
                     fast_eff = float(self._all_fuels['fast_charge']['refuel_efficiency'])
-                    slow_eff = float(self.fuels[battery_fuel]['refuel_efficiency'])
-                    rate = rate_raw * fast_eff / slow_eff
+                    rate = rate_raw * fast_eff   # kW delivered to battery
                 else:
                     rate = 0.0
             else:
                 rate = float(comp['refuel_rate'])
-            if rate > self.refuel_rate:
-                self.refuel_rate = rate
+            if np.any(self.range < prev):
+                self.refuel_rate   = rate
+                self._binding_fuel = f
 
     # -- Annual distance -------------------------------------------------------
 
@@ -396,13 +402,15 @@ class Vehicles:
         """
         daily_target = self.params['target_distance'] / 365.0 * 7.0 / 5.0
 
-        battery_comp    = self.params['components'].get('battery')
-        battery_fuel    = next((f for f in self.fuels if 'charge' in f), None) if battery_comp else None
-        battery_cap     = float(battery_comp['capacity'])      if battery_comp else 0.0
-        deg_per_year    = float(battery_comp['deg_per_year'])  if battery_comp else 0.0
-        deg_per_cycle   = float(battery_comp['deg_per_cycle']) if battery_comp else 0.0
+        battery_comp       = self.params['components'].get('battery')
+        battery_fuel       = next((f for f in self.fuels if 'charge' in f), None) if battery_comp else None
+        battery_cap        = float(battery_comp['capacity'])      if battery_comp else 0.0
+        deg_per_year       = float(battery_comp['deg_per_year'])  if battery_comp else 0.0
+        deg_per_cycle      = float(battery_comp['deg_per_cycle']) if battery_comp else 0.0
+        battery_refuel_eff = float(self.fuels[battery_fuel]['refuel_efficiency']) if battery_fuel else 1.0
 
-        primary_fuel = next(iter(self.fuel_consumption))
+        binding_refuel_eff = float(self.fuels[self._binding_fuel].get('refuel_efficiency', 1.0)) \
+                             if self._binding_fuel else 1.0
         range_ = self.range.copy()
         self.annual_distance   = np.zeros(len(self.age))
         self._enroute_distance = np.zeros(len(self.age))
@@ -421,7 +429,7 @@ class Vehicles:
                 # Estimate extra distance achievable during a refuelling/recharging stop
                 shortfall = daily_target[a] - range_[a]
                 time_left = shortfall / max(self.average_speed[a], 1.0)
-                fc_a = self.fuel_consumption[primary_fuel][a]
+                fc_a = self.fuel_consumption[self._binding_fuel][a] * binding_refuel_eff
                 if self.refuel_rate > 0 and fc_a > 0:
                     # Time budget formula: (available_time - 0.25h overhead) × achievable rate
                     achievable = max(0.0,
@@ -438,7 +446,7 @@ class Vehicles:
             if (battery_fuel and battery_cap > 0
                     and self.fuel_consumption[battery_fuel][a] > 0):
                 cycles += (self.annual_distance[a]
-                           * self.fuel_consumption[battery_fuel][a] / battery_cap)
+                           * self.fuel_consumption[battery_fuel][a] * battery_refuel_eff / battery_cap)
 
         self.range = range_  # save degraded-by-age range back to attribute
         self.annual_fuel = {
@@ -446,16 +454,18 @@ class Vehicles:
             for f in self.fuel_consumption
         }
 
-        # Split slow_charge into depot (slow) + en-route (fast) portions.
-        # Mirrors the cost split in _calculate_annual_cost so fuel_usage and
-        # emissions both reflect which charger type delivered the energy.
+        # Split slow_charge into depot (slow) + en-route (fast) portions so that
+        # fuel_usage and emissions reflect which charger type delivered the energy.
+        # Depot portion = (annual_distance − enroute_distance) × fc_slow [grid kWh].
+        # En-route portion = enroute_distance × fc_fast [grid kWh], where
+        #   fc_fast = fc_slow × slow_eff / fast_eff (same battery kWh, more wall losses).
         if battery_fuel == 'slow_charge' and np.any(self._enroute_distance > 0):
             slow_eff    = float(self.fuels[battery_fuel].get('refuel_efficiency', 1.0))
             fast_data   = self._all_fuels.get('fast_charge', {})
             fast_eff    = float(fast_data.get('refuel_efficiency', slow_eff))
             fc_per_km   = self.fuel_consumption[battery_fuel]
             enroute_kwh = self._enroute_distance * fc_per_km * slow_eff / fast_eff
-            self.annual_fuel[battery_fuel] = self.annual_fuel[battery_fuel] - enroute_kwh
+            self.annual_fuel[battery_fuel] = self.annual_fuel[battery_fuel] - self._enroute_distance * fc_per_km
             self.annual_fuel['fast_charge'] = enroute_kwh
             if 'fast_charge' not in self.fuels and fast_data:
                 self.fuels['fast_charge'] = fast_data
@@ -500,7 +510,7 @@ class Vehicles:
             float(p['frame_mass'])
             + float(p.get('trailer_mass', 0)) * float(p.get('trailers_per_truck', 0))
         ) * emb
-        for comp_name, comp in p['components'].items():
+        for _, comp in p['components'].items():
             if comp['type'] == 'ess' and 'embodied_emissions' in comp:
                 embodied_total += float(comp['capacity']) * float(comp['embodied_emissions'])
         self.embodied = np.concatenate([[embodied_total], np.zeros(len(self.age) - 1)])
@@ -596,27 +606,11 @@ class Vehicles:
 
         Revenue is also computed here: annual_distance × payload_tonnes × revenue_per_tkm.
         """
-        fuel_cost    = np.zeros(len(self.age))
-        battery_fuel = next((f for f in self.fuels if 'charge' in f), None)
+        fuel_cost = np.zeros(len(self.age))
         for f, annual in self.annual_fuel.items():
             cost_arr = np.asarray(self.fuels[f]['cost'])
             idx      = np.clip(self.operation_years - self._Y_start, 0, len(cost_arr) - 1)
-            if f == 'slow_charge' and f == battery_fuel and np.any(self._enroute_distance > 0):
-                # En-route km are fast-charged: separate pricing and efficiency
-                slow_eff  = float(self.fuels[f].get('refuel_efficiency', 1.0))
-                fc_per_km = self.fuel_consumption[f]               # wall-plug kWh/km (slow basis)
-                fast_data = self._all_fuels.get('fast_charge', {})
-                fast_eff  = float(fast_data.get('refuel_efficiency', 1.0))
-                # Grid kWh for en-route km (battery kWh / fast_eff)
-                enroute_kwh = self._enroute_distance * fc_per_km * slow_eff / fast_eff
-                depot_kwh   = annual - self._enroute_distance * fc_per_km
-                fuel_cost  += depot_kwh * cost_arr[idx]
-                if fast_data:
-                    fast_cost = np.asarray(fast_data['cost'])
-                    idx_f     = np.clip(self.operation_years - self._Y_start, 0, len(fast_cost) - 1)
-                    fuel_cost += enroute_kwh * fast_cost[idx_f]
-            else:
-                fuel_cost += annual * cost_arr[idx]
+            fuel_cost += annual * cost_arr[idx]
 
         # FC replacement cost (time-varying $/kW × capacity × replacement events)
         fc_comp = self.params['components'].get('fc')
@@ -874,7 +868,7 @@ class Fleet:
         # Fleet emissions [kgCO2e/year]
         self.emissions = {k: {'embodied': np.zeros(len(T)), 'supply': np.zeros(len(T)), 'use': np.zeros(len(T))} for k in self.K}
         # System costs [$/year]
-        self.system_costs = {k: {c: np.zeros(len(T)) for c in ('capital', 'operational', 'fuel', 'driver')} for k in self.K}
+        self.system_costs = {k: {c: np.zeros(len(T)) for c in ('capital', 'operational', 'fuel', 'driver', 'fc_replacements')} for k in self.K}
 
         for k in self.K:
             for p in self.P[k]:
@@ -893,7 +887,7 @@ class Fleet:
                         self.emissions[k]['embodied'][i] += n * v.embodied[a]
                         self.emissions[k]['supply'][i]   += n * v.emissions_supply[a]
                         self.emissions[k]['use'][i]      += n * v.emissions_use[a]
-                        for c in ('operational', 'fuel', 'driver'):
+                        for c in ('operational', 'fuel', 'driver', 'fc_replacements'):
                             self.system_costs[k][c][i] += n * v.annual_cost[c][a]
                     # Capital at point of sale
                     if START_YEAR <= y <= END_YEAR:

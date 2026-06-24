@@ -47,7 +47,6 @@ C:\Users\ivana\anaconda3\python.exe model.py
 - [x] `Fleet._calculate_market_share()` — complete: multinomial logit + iterative production cap
 - [x] `Fleet._aggregate()` — complete: total_stock, sales, fuel_usage, emissions, system_costs
 - [x] `plots/vehicle_plots.py` — per-cohort sanity checks; `plots/fleet_plots.py` — fleet-level line plots
-- [ ] Physical plausibility check — total mass 28.9 t for sleeper diesel seems low (expect ~36-40 t loaded); payload calculation may need review
 - [ ] Monte Carlo runner (`run.py`) — not yet written
 - [ ] Policies (carbon tax, LCFS, ZEV mandate) — not yet implemented
 
@@ -91,3 +90,4 @@ Module function:    _market_share_limit (production cap helper)
 1. Check total mass plausibility — sleeper diesel showing 28.9 t loaded (expect ~36-40 t)
 2. Write `run.py` Monte Carlo runner (multiprocessing, per-scenario output aggregation)
 3. Add policy layers (carbon tax, LCFS, ZEV mandate) to `Vehicles.annual_cost`
+4. Verify `model.py` checked up to `_calculate_fuel_consumption` — remaining methods still need review
