@@ -28,6 +28,9 @@ To do:
  - Add PHEs and give them a quarter of a charger each.
  - Adjust the activity requrements and fuel consumption calculations
    given the payload changes.
+ - Profile the model.
+ - Make sure there are embodied emissions on FC replacements.
+ - Make the git accessible but not all of it to everyone.
  
  Checked up to:
   - _calculate_fuel_consumption

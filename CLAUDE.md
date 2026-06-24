@@ -30,6 +30,18 @@ powertrains that contain that component, rather than sampled independently.
 C:\Users\ivana\anaconda3\python.exe model.py
 ```
 
+## Regression snapshot
+
+Before making any code changes, run:
+```
+C:\Users\ivana\anaconda3\python.exe verification/snapshot.py save
+```
+After changes, run:
+```
+C:\Users\ivana\anaconda3\python.exe verification/snapshot.py check
+```
+This compares 1820 fleet output values and reports any that shifted by more than 0.01%. If outputs change unexpectedly, investigate before proceeding. `verification/snapshot.npz` is the saved baseline — overwrite it intentionally when a change is deliberate.
+
 ## Conventions
 
 - **Never silently change parameter values.** All values come from calibrated sources. If something looks wrong, flag it and ask.
