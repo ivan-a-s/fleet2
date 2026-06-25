@@ -27,9 +27,11 @@ To do:
  - Make the git accessible but not all of it to everyone.
  - I can't see an embodied spike for FCETs in vehicle_plots.py
  - Scale factors to relate cost to scale somehow.
+ - Policy net revenue plots.
  Checked up to:
   - _calculate_fuel_consumption
 """
+import warnings
 import numpy as np
 import copy
 import scipy.stats as stats
@@ -85,7 +87,7 @@ CHARGER_POWERTRAINS = {'be'}
 ALL_POWERTRAINS     = frozenset({'dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'})
 COST_CATEGORIES     = {
     'system': ('capital', 'operational', 'fuel', 'driver', 'fc_replacements'),
-    'policy': ('carbon_tax',),
+    'policy': ('carbon_tax', 'lcfs', 'zev_mandate'),
 }
 _YEAR0 = START_YEAR - MAX_AGE   # first year in all realised arrays (e.g. 2000)
 
@@ -215,8 +217,6 @@ class Vehicles:
     # -- Mass ------------------------------------------------------------------
 
     def _calculate_mass(self):
-        # TODO: ZEVs receive a GVWL exemption under ZEV mandate policy — use 'gvwl_exemption_kg'
-        # as the hook key (not 'gvwl_increase', which already exists in data.json as the limit value).
         gvwl_increase = float(self.params.get('gvwl_exemption_kg', 0.0))
         self.mass = {'frame': float(self.params['frame_mass'])}
         if float(self.params['trailer_mass']) > 0:
@@ -658,6 +658,8 @@ class Vehicles:
             'driver':          self.params['target_distance'] * float(self.params['driver_cost']),
             'fc_replacements': fc_replacement_cost,
             'carbon_tax':      np.zeros(len(self.age), dtype=np.float32),
+            'lcfs':            np.zeros(len(self.age), dtype=np.float32),
+            'zev_mandate':     np.zeros(len(self.age), dtype=np.float32),
         }
         self.annual_revenue = (
             self.annual_distance
@@ -723,6 +725,11 @@ class Fleet:
         self.market_share = {}  # (k, p, calendar_year) -> fraction [0, 1]
 
         self._build_initial_stock()
+        if self.policies and self.policies.lcfs:
+            for k in self.K:
+                # Build a temporary diesel vehicle at START_YEAR solely to extract
+                # baseline fuel consumption; not stored in self.vehicles.
+                self.policies.lcfs.set_baseline_fc(k, self._make_vehicle(k, 'dice', START_YEAR))
         self._run()
         self._aggregate()
 
@@ -734,6 +741,27 @@ class Fleet:
         if self.policies:
             self.policies.apply(v)
         return v
+
+    def _apply_mandate_penalty(self, t, penalty, p_zev, k=None):
+        """
+        Write ZEV mandate penalty/rebate into annual_cost['zev_mandate'][0] for all
+        year-t vehicles in vehicle type k (or all k if k is None), then recompute NPV.
+
+        Non-ZEV powertrains incur `penalty` $/vehicle/yr (at age 0).
+        ZEV powertrains receive a rebate scaled so that total payments balance:
+            rebate = penalty × (1 − p_zev) / max(p_zev, ε)
+        capped at `penalty` to avoid exploding rebates when p_zev is tiny.
+        """
+        rebate = min(penalty, penalty * max(1.0 - p_zev, 0.0) / max(p_zev, 1e-9))
+        for k_ in ([k] if k is not None else self.K):
+            for p in self.P[k_]:
+                if (k_, p, t) not in self.vehicles:
+                    continue
+                v = self.vehicles[k_, p, t]
+                v.annual_cost['zev_mandate'][0] = np.float32(
+                    -rebate if p in ZEV_POWERTRAINS else penalty
+                )
+                v._calculate_tco_npv()
 
     def _build_initial_stock(self):
         """
@@ -790,9 +818,25 @@ class Fleet:
         3. Market share + new purchases: _calculate_market_share() allocates fractions
            across powertrains; then the shortfall between activity_req and activity_met
            by surviving cohorts is filled by new sales split according to those fractions.
+           If a ZEV mandate is active, an outer convergence loop adjusts a penalty/rebate
+           on year-t vehicles until the ZEV share of new sales meets the target (or the
+           30-iteration limit is reached, after which a warning is emitted and the last
+           iterate is used).  Warm-start carries the converged penalty from the previous
+           year to speed convergence.  Oscillation is detected after 5 iterations and
+           dampened via bisection of the step.
         """
+        mandate = self.policies.zev_mandate if self.policies else None
+
+        # Warm-start: carry last year's converged penalty/ZEV share into next year
+        if mandate and mandate.scope == 'per_k':
+            warm_pen = {k: 0.0 for k in self.K}
+            warm_pzv = {k: 0.0 for k in self.K}
+        else:
+            warm_pen = 0.0
+            warm_pzv = 0.0
+
         for t in self.years:
-            # Roll surviving cohorts from t-1
+            # --- Step 1: roll surviving cohorts from t-1 ---
             if t > START_YEAR:
                 for k in self.K:
                     for p in self.P[k]:
@@ -805,30 +849,128 @@ class Fleet:
                             surv = self.vehicles[k, p, y].params['survival_rate']
                             self.stock[k, p, y, t] = np.float32(prev * float(surv[t - y]) / max(float(surv[t - 1 - y]), 1e-9))
 
-            # Build new vehicles for model year t
+            # --- Step 2: build new vehicles for model year t ---
             for k in self.K:
                 for p in self.P[k]:
                     self.vehicles[k, p, t] = self._make_vehicle(k, p, t)
 
-            # Market share then fill activity gap with new purchases
-            for k in self.K:
-                self._calculate_market_share(k, t)
-                activity_met = sum(
-                    self.stock.get((k, p, y, t), 0.0)
-                    * self.vehicles[k, p, y].annual_distance[t - y]
-                    * float(np.asarray(self.vehicles[k, p, y].mass['payload'])[t - y]) / 1000.0
-                    for p in self.P[k] for y in range(t - MAX_AGE + 1, t)
-                    if (k, p, y) in self.vehicles
-                )
-                avg_activity = sum(
-                    self.vehicles[k, p, t].annual_distance[0]
-                    * float(np.asarray(self.vehicles[k, p, t].mass['payload'])[0]) / 1000.0
-                    * self.market_share[k, p, t]
-                    for p in self.P[k]
-                )
-                new_sales = max((self.activity_req[k, t] - activity_met) / max(avg_activity, 1.0), 0.0)
-                for p in self.P[k]:
-                    self.stock[k, p, t, t] = np.float32(new_sales * self.market_share[k, p, t])
+            # --- Step 3: market share + mandate convergence ---
+            if mandate and mandate.scope == 'per_k':
+                for k in self.K:
+                    target   = mandate.target_at(t, k=k)
+                    active   = target > 1e-9
+                    penalty  = warm_pen[k] if active else 0.0
+                    p_zev    = warm_pzv[k]
+                    prev_pen = 0.0
+
+                    for n in range(30 if active else 1):
+                        if active:
+                            self._apply_mandate_penalty(t, penalty, p_zev, k=k)
+                        self._calculate_market_share(k, t)
+                        activity_met = sum(
+                            self.stock.get((k, p, y, t), 0.0)
+                            * self.vehicles[k, p, y].annual_distance[t - y]
+                            * float(np.asarray(self.vehicles[k, p, y].mass['payload'])[t - y]) / 1000.0
+                            for p in self.P[k] for y in range(t - MAX_AGE + 1, t)
+                            if (k, p, y) in self.vehicles
+                        )
+                        avg_activity = sum(
+                            self.vehicles[k, p, t].annual_distance[0]
+                            * float(np.asarray(self.vehicles[k, p, t].mass['payload'])[0]) / 1000.0
+                            * self.market_share[k, p, t]
+                            for p in self.P[k]
+                        )
+                        new_sales = max((self.activity_req[k, t] - activity_met) / max(avg_activity, 1.0), 0.0)
+                        for p in self.P[k]:
+                            self.stock[k, p, t, t] = np.float32(new_sales * self.market_share[k, p, t])
+
+                        if not active:
+                            break
+
+                        zev_k   = sum(float(self.stock.get((k, p, t, t), 0.0)) for p in self.P[k] if p in ZEV_POWERTRAINS)
+                        total_k = sum(float(self.stock.get((k, p, t, t), 0.0)) for p in self.P[k])
+                        p_zev   = zev_k / max(total_k, 1e-9)
+                        if p_zev >= target - 1e-3:
+                            break
+
+                        raw     = mandate.penalty_max * (target - p_zev) / max(1.0 - p_zev, 1e-9)
+                        new_pen = min(0.3 * penalty + 0.7 * raw, mandate.penalty_max)
+                        if n >= 5 and (new_pen - penalty) * (penalty - prev_pen) < 0:
+                            new_pen = (penalty + new_pen) * 0.5
+                        prev_pen = penalty
+                        penalty  = new_pen
+                        if abs(penalty - prev_pen) < 1.0:
+                            break  # penalty converged; production cap is binding — accept best achievable share
+                    else:
+                        warnings.warn(
+                            f"ZEV mandate (per_k={k!r}) did not converge at year {t}: "
+                            f"p_zev={p_zev:.3f} vs target={target:.3f}, "
+                            f"penalty=${penalty:,.0f}. Penalty oscillating after 30 iterations."
+                        )
+
+                    warm_pen[k] = penalty if active else 0.0
+                    warm_pzv[k] = p_zev   if active else 0.0
+
+            else:
+                # Fleet-wide convergence (or no mandate)
+                target   = mandate.target_at(t) if mandate else 0.0
+                active   = target > 1e-9
+                penalty  = warm_pen if active else 0.0
+                p_zev    = warm_pzv
+                prev_pen = 0.0
+
+                for n in range(30 if active else 1):
+                    if active:
+                        self._apply_mandate_penalty(t, penalty, p_zev)
+
+                    for k in self.K:
+                        self._calculate_market_share(k, t)
+                        activity_met = sum(
+                            self.stock.get((k, p, y, t), 0.0)
+                            * self.vehicles[k, p, y].annual_distance[t - y]
+                            * float(np.asarray(self.vehicles[k, p, y].mass['payload'])[t - y]) / 1000.0
+                            for p in self.P[k] for y in range(t - MAX_AGE + 1, t)
+                            if (k, p, y) in self.vehicles
+                        )
+                        avg_activity = sum(
+                            self.vehicles[k, p, t].annual_distance[0]
+                            * float(np.asarray(self.vehicles[k, p, t].mass['payload'])[0]) / 1000.0
+                            * self.market_share[k, p, t]
+                            for p in self.P[k]
+                        )
+                        new_sales = max((self.activity_req[k, t] - activity_met) / max(avg_activity, 1.0), 0.0)
+                        for p in self.P[k]:
+                            self.stock[k, p, t, t] = np.float32(new_sales * self.market_share[k, p, t])
+
+                    if not active:
+                        break
+
+                    zev_s   = sum(float(self.stock.get((k, p, t, t), 0.0))
+                                  for k in self.K for p in self.P[k] if p in ZEV_POWERTRAINS)
+                    total_s = sum(float(self.stock.get((k, p, t, t), 0.0))
+                                  for k in self.K for p in self.P[k])
+                    p_zev   = zev_s / max(total_s, 1e-9)
+                    if p_zev >= target - 1e-3:
+                        break
+
+                    raw     = mandate.penalty_max * (target - p_zev) / max(1.0 - p_zev, 1e-9)
+                    new_pen = min(0.3 * penalty + 0.7 * raw, mandate.penalty_max)
+                    if n >= 5 and (new_pen - penalty) * (penalty - prev_pen) < 0:
+                        new_pen = (penalty + new_pen) * 0.5
+                    prev_pen = penalty
+                    penalty  = new_pen
+                    if abs(penalty - prev_pen) < 1.0:
+                        break  # penalty converged; production cap is binding — accept best achievable share
+                else:
+                    if active:
+                        warnings.warn(
+                            f"ZEV mandate (fleet) did not converge at year {t}: "
+                            f"p_zev={p_zev:.3f} vs target={target:.3f}, "
+                            f"penalty=${penalty:,.0f}. Penalty oscillating after 30 iterations."
+                        )
+
+                warm_pen = penalty if active else 0.0
+                warm_pzv = p_zev   if active else 0.0
 
     def _calculate_market_share(self, k, t):
         """
@@ -891,7 +1033,9 @@ class Fleet:
         # Fleet emissions [kgCO2e/year]
         self.emissions = {k: {'embodied': np.zeros(len(T)), 'supply': np.zeros(len(T)), 'use': np.zeros(len(T))} for k in self.K}
         # System costs [$/year]
-        self.system_costs = {k: {c: np.zeros(len(T)) for c in ('capital', 'operational', 'fuel', 'driver', 'fc_replacements', 'carbon_tax')} for k in self.K}
+        _all_costs   = COST_CATEGORIES['system'] + COST_CATEGORIES['policy']
+        _flow_costs  = tuple(c for c in _all_costs if c != 'capital')
+        self.system_costs = {k: {c: np.zeros(len(T)) for c in _all_costs} for k in self.K}
 
         for k in self.K:
             for p in self.P[k]:
@@ -910,7 +1054,7 @@ class Fleet:
                         self.emissions[k]['embodied'][i] += n * v.embodied[a]
                         self.emissions[k]['supply'][i]   += n * v.emissions_supply[a]
                         self.emissions[k]['use'][i]      += n * v.emissions_use[a]
-                        for c in ('operational', 'fuel', 'driver', 'fc_replacements', 'carbon_tax'):
+                        for c in _flow_costs:
                             self.system_costs[k][c][i] += n * v.annual_cost[c][a]
                     # Capital at point of sale
                     if START_YEAR <= y <= END_YEAR:

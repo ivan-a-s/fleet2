@@ -365,7 +365,6 @@
 
                     "default_unloaded_mass": 12938,
                     "gvwl": 53500,
-                    "gvwl_increase": 5000,
                     "target_distance": {"array": "logistic", "max_val": 208714, "min_val": 17478, "k": 0.372, "x0": 7.62},
                     "revenue_per_tkm": 0.10,
                     "trailers_per_truck": 3,
@@ -515,7 +514,6 @@
 
                     "default_unloaded_mass": 12266,
                     "gvwl": 53500,
-                    "gvwl_increase": 3000,
                     "target_distance": {"array": "logistic", "max_val": 137922, "min_val": 11551, "k": 0.372, "x0": 7.62},
                     "revenue_per_tkm": 0.17,
                     "trailers_per_truck": 3,
@@ -665,7 +663,6 @@
 
                     "default_unloaded_mass": 9857,
                     "gvwl": 24250,
-                    "gvwl_increase": 2000,
                     "target_distance": {"array": "logistic", "max_val": 49003, "min_val": 4104, "k": 0.372, "x0": 7.62},
                     "revenue_per_tkm": 0.60,
                     "trailers_per_truck": 0,
