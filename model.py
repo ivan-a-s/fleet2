@@ -25,6 +25,8 @@ To do:
  - Add PHEs and give them a quarter of a charger each.
  - Adjust the activity requrements given the payload changes.
  - Make the git accessible but not all of it to everyone.
+ - I can't see an embodied spike for FCETs in vehicle_plots.py
+ - Scale factors to relate cost to scale somehow.
  Checked up to:
   - _calculate_fuel_consumption
 """
@@ -81,6 +83,10 @@ ZEV_POWERTRAINS     = {'be', 'fc', 'hice'}
 HICE_POWERTRAINS    = {'hice', 'dhice'}
 CHARGER_POWERTRAINS = {'be'}
 ALL_POWERTRAINS     = frozenset({'dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'})
+COST_CATEGORIES     = {
+    'system': ('capital', 'operational', 'fuel', 'driver', 'fc_replacements'),
+    'policy': ('carbon_tax',),
+}
 _YEAR0 = START_YEAR - MAX_AGE   # first year in all realised arrays (e.g. 2000)
 
 
@@ -209,8 +215,9 @@ class Vehicles:
     # -- Mass ------------------------------------------------------------------
 
     def _calculate_mass(self):
-        # TODO: ZEVs receive a GVWL exemption under ZEV mandate policy — disabled until policies are added
-        gvwl_increase = 0.0
+        # TODO: ZEVs receive a GVWL exemption under ZEV mandate policy — use 'gvwl_exemption_kg'
+        # as the hook key (not 'gvwl_increase', which already exists in data.json as the limit value).
+        gvwl_increase = float(self.params.get('gvwl_exemption_kg', 0.0))
         self.mass = {'frame': float(self.params['frame_mass'])}
         if float(self.params['trailer_mass']) > 0:
             self.mass['trailer'] = float(self.params['trailer_mass'])
@@ -650,6 +657,7 @@ class Vehicles:
             'fuel':            fuel_cost,
             'driver':          self.params['target_distance'] * float(self.params['driver_cost']),
             'fc_replacements': fc_replacement_cost,
+            'carbon_tax':      np.zeros(len(self.age), dtype=np.float32),
         }
         self.annual_revenue = (
             self.annual_distance
@@ -687,7 +695,7 @@ def _market_share_limit(prev_share, init, cagr_nacent, cagr_mature, threshold=0.
 
 
 class Fleet:
-    def __init__(self, params, param_cps, exclude_powertrains=()):
+    def __init__(self, params, param_cps, policies=None, exclude_powertrains=()):
         self.params = copy.deepcopy(params)
         self.realise_uncertainties(param_cps)
         self.params = convert_to_float32(self.params)
@@ -699,6 +707,7 @@ class Fleet:
                              for k in self.K}
         self.years        = np.arange(START_YEAR, END_YEAR + 1)
         self.price_lambda = float(self.params['fleet']['price_lambda'])
+        self.policies     = policies
 
         # Activity requirement (t-km/year) by vehicle type and calendar year
         init_act   = float(self.params['fleet']['initial_activity'])
@@ -718,12 +727,13 @@ class Fleet:
         self._aggregate()
 
     def _make_vehicle(self, k, p, t):
-        return Vehicles(
-            self.select_vehicle_params(k, p, t),
-            self.params['fuels'],
-            self.params['vehicles']['costs'],
-            p=p, k=k,
-        )
+        params = self.select_vehicle_params(k, p, t)
+        if self.policies:
+            self.policies.pre_apply(params, k=k, p=p, t=t)
+        v = Vehicles(params, self.params['fuels'], self.params['vehicles']['costs'], p=p, k=k)
+        if self.policies:
+            self.policies.apply(v)
+        return v
 
     def _build_initial_stock(self):
         """
@@ -881,7 +891,7 @@ class Fleet:
         # Fleet emissions [kgCO2e/year]
         self.emissions = {k: {'embodied': np.zeros(len(T)), 'supply': np.zeros(len(T)), 'use': np.zeros(len(T))} for k in self.K}
         # System costs [$/year]
-        self.system_costs = {k: {c: np.zeros(len(T)) for c in ('capital', 'operational', 'fuel', 'driver', 'fc_replacements')} for k in self.K}
+        self.system_costs = {k: {c: np.zeros(len(T)) for c in ('capital', 'operational', 'fuel', 'driver', 'fc_replacements', 'carbon_tax')} for k in self.K}
 
         for k in self.K:
             for p in self.P[k]:
@@ -900,7 +910,7 @@ class Fleet:
                         self.emissions[k]['embodied'][i] += n * v.embodied[a]
                         self.emissions[k]['supply'][i]   += n * v.emissions_supply[a]
                         self.emissions[k]['use'][i]      += n * v.emissions_use[a]
-                        for c in ('operational', 'fuel', 'driver', 'fc_replacements'):
+                        for c in ('operational', 'fuel', 'driver', 'fc_replacements', 'carbon_tax'):
                             self.system_costs[k][c][i] += n * v.annual_cost[c][a]
                     # Capital at point of sale
                     if START_YEAR <= y <= END_YEAR:

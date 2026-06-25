@@ -16,104 +16,14 @@ Run this file directly to show all plots for all vehicle types.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 import matplotlib.pyplot as plt
-from model import Fleet, get_uncertainty_distributions, START_YEAR, END_YEAR, MAX_AGE, DISCOUNT_RATE
+from model import Fleet, get_uncertainty_distributions, START_YEAR, MAX_AGE
 from data import PARAMS
-
-SAMPLE_YEARS = [2025, 2030, 2035, 2040, 2045, 2050]
-
-_CYCLE   = plt.rcParams['axes.prop_cycle'].by_key()['color']
-plt.rcParams.update({'font.size': 12, 'axes.titlesize': 13, 'axes.labelsize': 12,
-                     'xtick.labelsize': 11, 'ytick.labelsize': 11})
-
-PT_COLOR = {p: _CYCLE[i % len(_CYCLE)]
-            for i, p in enumerate(['dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'])}
-
-KEY_LABELS = {
-    'frame':                   'Frame',
-    'trailer':                 'Trailer',
-    'payload':                 'Payload',
-    'ice':                     'ICE',
-    'motor':                   'Motor',
-    'battery':                 'Battery',
-    'fc':                      'Fuel Cell',
-    'diesel_tank':             'Diesel Tank',
-    'h2_700bar':               'H₂ Tank (700 bar)',
-    'h2_350bar':               'H₂ Tank (350 bar)',
-    'electronic_controller':   'Electronic Controller',
-    'combustion_transmission': 'Combustion Transmission',
-    'electric_transmission':   'Electric Transmission',
-    'after_treatment':         'Aftertreatment',
-    'engine':                  'Engine',
-    'h2_tank':                 'H₂ Tank',
-    'tank':                    'Diesel Tank',
-    'charger':                 'Charger',
-    'capital':                 'Capital',
-    'operational':             'Operational',
-    'fuel':                    'Fuel',
-    'driver':                  'Driver',
-    'fc_replacements':         'FC Replacements',
-    'revenue':                 'Revenue',
-    'embodied':                'Embodied',
-    'supply':                  'Supply',
-    'use':                     'Use',
-}
-
-PT_LABELS = {
-    'dice':  'DICE',
-    'he':    'HE',
-    'phe':   'PHE',
-    'be':    'BE',
-    'fc':    'FC',
-    'hice':  'HICE',
-    'dhice': 'DHICE',
-}
-
-K_LABELS = {
-    'sleeper':  'Sleeper',
-    'day_cab':  'Day Cab',
-    'straight': 'Straight',
-}
-
-def _unique_keys(fleet, k, attr):
-    """All unique non-zero component keys across every vehicle of type k, in first-appearance order."""
-    seen = []
-    for p in fleet.P[k]:
-        for y in SAMPLE_YEARS:
-            if (k, p, y) not in fleet.vehicles:
-                continue
-            for key, val in getattr(fleet.vehicles[k, p, y], attr).items():
-                if key not in seen and np.any(np.asarray(val) != 0):
-                    seen.append(key)
-    return seen
-
-def _colours(keys):
-    """Standard cycle color for each key, assigned by position."""
-    return {key: _CYCLE[i % len(_CYCLE)] for i, key in enumerate(keys)}
-
-def _bar_layout(n, year_gap=5, fill=0.80, internal_gap=0.10):
-    width   = (year_gap * fill - (n - 1) * internal_gap) / max(n, 1)
-    offsets = [i * (width + internal_gap) - (year_gap * fill) / 2 + width / 2 for i in range(n)]
-    return width, offsets
-
-def _stacked_bar(ax, x, comps, width, col):
-    """Stacked bar using pre-built name→color dict col."""
-    bottom = 0.0
-    for key, val in comps.items():
-        val = float(np.asarray(val).flat[0])
-        if val == 0:
-            continue
-        ax.bar(x, val, bottom=bottom, width=width, color=col[key], label=key)
-        bottom += val
-    return bottom
-
-def _legend(ax, keys, col, **kw):
-    """Legend in key order, one entry per key, using pre-built colors."""
-    handles = [plt.Rectangle((0, 0), 1, 1, color=col[k]) for k in keys]
-    labels  = [KEY_LABELS.get(k, k) for k in keys]
-    ax.legend(handles, labels, **kw)
+from plot_utils import (SAMPLE_YEARS, PT_COLOR, PT_LABELS, K_LABELS,
+                        _unique_keys, _colours, _bar_layout, _stacked_bar, _legend)
 
 
 # ---------------------------------------------------------------------------
@@ -188,8 +98,8 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
         if (k, p, y) not in fleet.vehicles:
             continue
         v = fleet.vehicles[k, p, y]
-        ax.plot(age, v.annual_distance,             color=PT_COLOR.get(p, 'gray'), label=PT_LABELS.get(p, p))
-        ax.plot(age, v.params['target_distance'],   color=PT_COLOR.get(p, 'gray'), linestyle='--', alpha=0.4)
+        ax.plot(age, v.annual_distance,           color=PT_COLOR.get(p, 'gray'), label=PT_LABELS.get(p, p))
+        ax.plot(age, v.params['target_distance'], color=PT_COLOR.get(p, 'gray'), linestyle='--', alpha=0.4)
     ax.set_ylim(0, None)
     ax.legend(fontsize=7, title='dashed = target')
 
