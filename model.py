@@ -16,22 +16,15 @@ The simulation proceeds in three layers:
   3. Aggregate — totals over the stock for fuel use, emissions, and system costs.
 
 To do:
- - Apply some checks (average distance, activity, etc)
- - Market share limit inside fleet.
  - Size vehicle components for NPV optimisation?
  - Altitude on FC/engine performance and air resistance.
  - Make scrappage/usage decisions for vehicles?
  - Make sure I am happy with the accessory load and how efficiency is applied.
  - Add a resource-haul vehicle type.
- - Make sure powertrain embodied emissions are measured.
- - Check cost of HICE engine.
+ - Adjust the embodied emission factors for the powertrain components using GREET.
  - Add PHEs and give them a quarter of a charger each.
- - Adjust the activity requrements and fuel consumption calculations
-   given the payload changes.
- - Profile the model.
- - Make sure there are embodied emissions on FC replacements.
+ - Adjust the activity requrements given the payload changes.
  - Make the git accessible but not all of it to everyone.
- 
  Checked up to:
   - _calculate_fuel_consumption
 """
@@ -73,10 +66,10 @@ def estimate_fuel_consumption(input_data, model_params):
     return total
 
 # Surrogate model mappings
-# hice/dhice reuse he_parallel surrogate; all other powertrains match by name
+# hice reuses he surrogate (H2 ICE hybrid mirrors HEV mechanics); dhice reuses dice surrogate (no regen)
 SURROGATE_NAME = {
     'hice': 'he',
-    'dhice': 'he',
+    'dhice': 'dice',
 }
 # Which component efficiency to pass as peak_eff to the surrogate
 EFF_COMPONENT = {
@@ -88,6 +81,7 @@ ZEV_POWERTRAINS     = {'be', 'fc', 'hice'}
 HICE_POWERTRAINS    = {'hice', 'dhice'}
 CHARGER_POWERTRAINS = {'be'}
 ALL_POWERTRAINS     = frozenset({'dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'})
+_YEAR0 = START_YEAR - MAX_AGE   # first year in all realised arrays (e.g. 2000)
 
 
 # ---------------------------------------------------------------------------
@@ -95,11 +89,13 @@ ALL_POWERTRAINS     = frozenset({'dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice
 # ---------------------------------------------------------------------------
 
 def get_uncertainty_distributions(d, current_path=()):
-    """Walk the nested params dict and return all leaf nodes that contain a 'dist' key."""
+    """Walk the nested params dict; return (path, group) for each leaf with a 'dist' key.
+    group is the value of the optional 'group' field in the dist spec, or None.
+    Distributions in the same group share one cp in a Monte Carlo run (see __main__)."""
     paths = []
     if isinstance(d, dict):
         if 'dist' in d:
-            paths.append((current_path, d))
+            paths.append((current_path, d.get('group', None)))
         else:
             for k, v in d.items():
                 paths.extend(get_uncertainty_distributions(v, current_path + (k,)))
@@ -156,12 +152,16 @@ def set_year(input_dict, year=START_YEAR, years=np.arange(START_YEAR - MAX_AGE, 
     efficiencies, etc. appropriate to its model year rather than full time series.
     Arrays covering age (target_distance, drive_cycle, survival_rate) are excluded
     from this slicing — they vary by vehicle age, not calendar year.
+
+    Non-mutating: always returns a new object; the input is never modified.
+    This allows select_vehicle_params() to pass in shallow-copied dicts without
+    needing deepcopy to protect self.params from mutation.
     """
     if isinstance(input_dict, np.ndarray):
-        return input_dict[np.where(years == year)[0][0]]
+        idx = year - _YEAR0
+        return input_dict[max(0, min(idx, len(input_dict) - 1))]
     elif isinstance(input_dict, dict):
-        for key, value in input_dict.items():
-            input_dict[key] = set_year(value, year, years)
+        return {key: set_year(value, year, years) for key, value in input_dict.items()}
     return input_dict
 
 
@@ -191,6 +191,10 @@ class Vehicles:
         self.model_year   = int(params['model_year'])
         self.operation_years = self.model_year + self.age
         self._Y_start     = START_YEAR - MAX_AGE   # first year in all realized arrays (e.g. 2000)
+
+        self._discount_factor = (
+            np.asarray(params['survival_rate']) / (1.0 + DISCOUNT_RATE) ** self.age
+        )
 
         self._calculate_mass()
         self._calculate_fuel_consumption()
@@ -303,7 +307,7 @@ class Vehicles:
             return {'h2': raw_val * DIESEL_LHV / H2_LHV}
 
         elif self.p == 'dhice':
-            # Reuses the HEV surrogate (diesel L/km total); split total energy into diesel
+            # Reuses the DICE surrogate (diesel L/km total); split total energy into diesel
             # and H2 fractions using the proportions declared in data.json, then convert
             # each fraction back to its own units via LHV
             d_prop = fp.get('diesel', {}).get('proportion', 0.75)
@@ -414,6 +418,7 @@ class Vehicles:
 
         binding_refuel_eff = float(self.fuels[self._binding_fuel].get('refuel_efficiency', 1.0)) \
                              if self._binding_fuel else 1.0
+
         range_ = self.range.copy()
         self.annual_distance   = np.zeros(len(self.age))
         self._enroute_distance = np.zeros(len(self.age))
@@ -498,9 +503,17 @@ class Vehicles:
     def _calculate_emissions(self):
         """
         Three emission streams:
-          embodied      — manufacturing emissions, assigned entirely to age 0 (kgCO2e).
-                          Frame/trailer use a $/kg embodied factor; batteries add a
-                          separate kgCO2e/kWh term for their manufacture.
+          embodied      — manufacturing emissions (kgCO2e): initial manufacture at age 0;
+                          FC stack replacements at their actual replacement ages, if any.
+                          Frame/trailer use the shared embodied_emissions (kgCO2e/kg).
+                          Converter/transmission components use their own embodied_emissions
+                          field (same distribution, falls back to shared factor if absent).
+                          ESS components use a dedicated kgCO2e/unit-capacity field.
+                          All embodied_emissions distributions share one MC cp ("embodied"
+                          group in data.json) — high/low manufacturing decarbonisation moves
+                          all factors together.
+                          Survival is handled by _aggregate (n = surviving vehicle count),
+                          so replacement emissions at late ages scale down automatically.
           emissions_supply — upstream (well-to-tank) emissions per year (kgCO2e/yr).
           emissions_use    — tailpipe (tank-to-wheel) emissions per year (kgCO2e/yr).
                              Zero for ZEVs (no combustion at point of use).
@@ -508,7 +521,7 @@ class Vehicles:
         the emissions intensities (kgCO2e per source unit) apply directly.
         """
         p = self.params
-        emb = float(p['embodied'])
+        emb = float(p['embodied_emissions'])
         embodied_total = (
             float(p['frame_mass'])
             + float(p.get('trailer_mass', 0)) * float(p.get('trailers_per_truck', 0))
@@ -516,7 +529,16 @@ class Vehicles:
         for _, comp in p['components'].items():
             if comp['type'] == 'ess' and 'embodied_emissions' in comp:
                 embodied_total += float(comp['capacity']) * float(comp['embodied_emissions'])
+            elif comp['type'] in ('converter', 'transmission') and 'mass' in comp:
+                comp_emb = float(comp.get('embodied_emissions', emb))
+                embodied_total += float(comp['mass']) * comp_emb
         self.embodied = np.concatenate([[embodied_total], np.zeros(len(self.age) - 1)])
+        # FC stack replacement embodied emissions: distributed to actual replacement ages.
+        # Survival is handled by _aggregate (n = surviving vehicle count), same as fc_replacement costs.
+        fc_comp = self.params['components'].get('fc')
+        if fc_comp is not None and np.any(self.fc_replacements > 0):
+            comp_emb = float(fc_comp.get('embodied_emissions', emb))
+            self.embodied = self.embodied + self.fc_replacements * float(fc_comp['mass']) * comp_emb
 
         self.emissions_supply = np.zeros(len(self.age))
         self.emissions_use    = np.zeros(len(self.age))
@@ -636,20 +658,8 @@ class Vehicles:
         )
 
     def _discount(self, annual):
-        """
-        Survival-weighted net-present value of an annual cost/revenue array.
-
-        NPV = Σ_a  annual[a] × survival_rate[a] / (1 + r)^a
-
-        survival_rate[a] ∈ [0, 1] is the probability the vehicle is still operating at age a,
-        so the expectation over the fleet is already embedded here (no separate fleet-level
-        discounting is needed).  r = DISCOUNT_RATE from settings.
-        """
-        return float(np.sum(
-            np.asarray(annual)
-            * np.asarray(self.params['survival_rate'])
-            / (1.0 + DISCOUNT_RATE) ** self.age
-        ))
+        """Survival-weighted NPV: Σ_a  annual[a] × survival_rate[a] / (1+r)^a."""
+        return float(np.sum(np.asarray(annual) * self._discount_factor))
 
     def _calculate_tco_npv(self):
         """
@@ -911,14 +921,22 @@ class Fleet:
         Then set_year() slices all time-varying arrays to scalar values at year y.
         Age-varying arrays (target_distance, drive_cycle, survival_rate) are excluded from
         set_year() because Vehicles uses them indexed by vehicle age, not calendar year.
+
+        No deepcopy is needed because set_year() is non-mutating: it returns new dicts rather
+        than modifying its input. Shallow dict() copies are sufficient to create fresh container
+        structures; age-varying numpy arrays are shared references (read-only in Vehicles).
         """
-        vehicle_params  = copy.deepcopy(self.params['vehicles']['types'][k]['shared'])
-        vehicle_params |= copy.deepcopy(self.params['vehicles']['types'][k]['powertrains'][p])
-        for comp_name, comp in list(vehicle_params['components'].items()):
-            shared_def = copy.deepcopy(self.params['vehicles']['components'][comp['type']][comp_name])
-            if isinstance(shared_def, dict) and any(k in ALL_POWERTRAINS for k in shared_def):
+        vehicle_params  = dict(self.params['vehicles']['types'][k]['shared'])
+        vehicle_params |= dict(self.params['vehicles']['types'][k]['powertrains'][p])
+        components = {}
+        for comp_name, comp in vehicle_params['components'].items():
+            comp_copy  = dict(comp)
+            shared_def = self.params['vehicles']['components'][comp['type']][comp_name]
+            if isinstance(shared_def, dict) and any(kk in ALL_POWERTRAINS for kk in shared_def):
                 shared_def = shared_def.get(p, {})
-            comp.update({kk: v for kk, v in shared_def.items() if kk not in comp})
+            comp_copy.update({kk: v for kk, v in shared_def.items() if kk not in comp_copy})
+            components[comp_name] = comp_copy
+        vehicle_params['components'] = components
         vehicle_params['model_year'] = y
         exclude = {'target_distance', 'drive_cycle', 'survival_rate', 'average_speed', 'payload'}
         for key in list(vehicle_params.keys()):
@@ -952,8 +970,15 @@ class Fleet:
 
 if __name__ == "__main__":
     np.random.seed(0)
-    inputs_distributions = dict(get_uncertainty_distributions(PARAMS))
-    param_cps = dict(zip(inputs_distributions.keys(), np.random.rand(len(inputs_distributions)).astype('float32')))
+    group_cps  = {}
+    param_cps  = {}
+    for path, group in get_uncertainty_distributions(PARAMS):
+        if group is not None:
+            if group not in group_cps:
+                group_cps[group] = np.float32(np.random.rand())
+            param_cps[path] = group_cps[group]
+        else:
+            param_cps[path] = np.float32(np.random.rand())
     fleet = Fleet(PARAMS, param_cps)
 
     v = fleet.vehicles['sleeper', 'dice', START_YEAR]

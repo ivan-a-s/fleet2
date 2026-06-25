@@ -23,6 +23,7 @@ powertrains that contain that component, rather than sampled independently.
 | `vehicle_modelling/surrogates.json` | Surrogate coefficients per (powertrain, drive_cycle) used for inference |
 | `plots/vehicle_plots.py` | Per-cohort sanity-check plots (mass, FC, TCO, emissions, etc.) |
 | `plots/fleet_plots.py` | Fleet-level line plots (stock, sales, fuel use, emissions, costs) |
+| `verification/profile_fleet.py` | cProfile script for `Fleet()`; phase table + top-25 by self/cumtime; saves `profile.prof` |
 
 ## Running
 
@@ -49,6 +50,8 @@ This compares 1820 fleet output values and reports any that shifted by more than
 - `set_param()` / `set_year()` / `realise_uncertainties()` in `model.py` handle all uncertainty sampling.
 - Array specs in `data.json` use `{"array": "logistic"|"linspace"|"step"|"constant", ...}` — expanded by `data.py` loader.
 - `load_model_params()` and `estimate_fuel_consumption()` are copied directly into `model.py` (not imported from `fuel_consumption.py`) to avoid the fastsim dependency at runtime.
+- **`set_year()` is non-mutating** — it returns new dicts/scalars and never modifies its input. This means `select_vehicle_params()` only needs shallow `dict()` copies, not `deepcopy`. Do not change `set_year()` to mutate in-place.
+- **`_discount_factor`** is precomputed once in `Vehicles.__init__` as `survival_rate / (1+r)^age`. Use `v._discount_factor[0]` for NPV adjustments at age 0 (e.g. ZEV mandate penalty) rather than recomputing the full discount sum.
 
 ## Build status
 
@@ -72,7 +75,8 @@ Helper functions:   load_model_params, estimate_fuel_consumption,
 Module constants:   _SURROGATES (loaded from vehicle_modelling/surrogates.json),
                     SURROGATE_NAME, EFF_COMPONENT,
                     ZEV_POWERTRAINS, HICE_POWERTRAINS,
-                    CHARGER_POWERTRAINS, ALL_POWERTRAINS
+                    CHARGER_POWERTRAINS, ALL_POWERTRAINS,
+                    _YEAR0 (= START_YEAR - MAX_AGE, first year in all realised arrays)
 
 Vehicles class:     _calculate_mass, _calculate_fuel_consumption,
                     _split_surrogate_output, _calculate_range,
@@ -103,3 +107,10 @@ Module function:    _market_share_limit (production cap helper)
 2. Write `run.py` Monte Carlo runner (multiprocessing, per-scenario output aggregation)
 3. Add policy layers (carbon tax, LCFS, ZEV mandate) to `Vehicles.annual_cost`
 4. Verify `model.py` checked up to `_calculate_fuel_consumption` — remaining methods still need review
+
+## Performance notes
+
+Single `Fleet()` run takes ~0.53 s at median params. The dominant cost is constructing 543 `Vehicles`
+objects in `_run()` — inherent physics, not easily vectorised. Further optimisation opportunities
+(ZEV mandate loop, Monte Carlo parallelism, `activity_met` vectorisation) are documented in the
+`verification/profile_fleet.py` docstring under "Remaining optimisation opportunities".

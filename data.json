@@ -164,6 +164,7 @@
             "converter": {
                 "ice": {
                     "mass": 1451,
+                    "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
                     "efficiency": {
                         "dist": "interp",
                         "2000": {"dist": "const", "val": 0.40},
@@ -176,34 +177,42 @@
                 "motor": {
                     "he": {
                         "mass": 104,
+                        "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
                         "efficiency": 0.875
                     },
                     "hice": {
                         "mass": 104,
+                        "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
                         "efficiency": 0.875
                     },
                     "fc": {
                         "mass": 610,
+                        "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
                         "efficiency": 0.875
                     },
                     "be": {
                         "mass": 537,
+                        "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
                         "efficiency": 0.875
                     }
                 },
                 "electronic_controller": {
                     "be": {
-                        "mass": 57
+                        "mass": 57,
+                        "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}}
                     },
                     "fc": {
-                        "mass": 64
+                        "mass": 64,
+                        "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}}
                     },
                     "he": {
-                        "mass": 11
+                        "mass": 11,
+                        "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}}
                     }
                 },
                 "fc": {
                     "mass": 625,
+                    "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
                     "efficiency": {
                         "dist": "interp",
                         "2025": {"dist": "const", "val": 0.59},
@@ -234,6 +243,7 @@
                     },
                     "embodied_emissions": {
                         "dist": "linear",
+                        "group": "embodied",
                         "start": {"dist": "const", "val": 87.0},
                         "end": {"dist": "uniform", "min": 20.0, "max": 40.0}
                     },
@@ -261,6 +271,7 @@
                     },
                     "embodied_emissions": {
                         "dist": "linear",
+                        "group": "embodied",
                         "start": {"dist": "const", "val": 40.7},
                         "end": {"dist": "triangle", "min": 13.6, "mode": 25.7, "max": 33.2}
                     },
@@ -275,6 +286,7 @@
                     },
                     "embodied_emissions": {
                         "dist": "linear",
+                        "group": "embodied",
                         "start": {"dist": "const", "val": 40.7},
                         "end": {"dist": "triangle", "min": 13.6, "mode": 25.7, "max": 33.2}
                     },
@@ -285,11 +297,13 @@
             "transmission": {
                 "combustion_transmission": {
                     "efficiency": 0.95,
-                    "mass": 445
+                    "mass": 445,
+                    "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}}
                 },
                 "electric_transmission": {
                     "efficiency": 0.97,
-                    "mass": 204
+                    "mass": 204,
+                    "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}}
                 }
             },
             "accessories": {
@@ -363,8 +377,9 @@
                     "trailer_mass": 5029,
                     "mass_correction": 0.2,
                     "p_weighed_out": 0.3,
-                    "embodied": {
+                    "embodied_emissions": {
                         "dist": "interp",
+                        "group": "embodied",
                         "2025": {"dist": "const", "val": 2.2},
                         "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}
                     },
@@ -512,8 +527,9 @@
                     "trailer_mass": 5029,
                     "mass_correction": 0.2,
                     "p_weighed_out": 0.3,
-                    "embodied": {
+                    "embodied_emissions": {
                         "dist": "interp",
+                        "group": "embodied",
                         "2025": {"dist": "const", "val": 2.2},
                         "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}
                     },
@@ -661,7 +677,7 @@
                     "trailer_mass": 0,
                     "mass_correction": 0.2,
                     "p_weighed_out": 0.3,
-                    "embodied": {"dist": "const", "val": 2.0},
+                    "embodied_emissions": {"dist": "const", "val": 2.0, "group": "embodied"},
                     "driver_cost": 0.50,
                     "drag_coef": {
                         "dist": "interp",
