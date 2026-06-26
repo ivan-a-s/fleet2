@@ -1,8 +1,8 @@
 """
-Strand 4 — Sensitivity / elasticity diagnostics for fleet2.
+Strand 4 -- Sensitivity / elasticity diagnostics for fleet2.
 
-Varies three parameters by ±20% and checks that BEV market share in 2040
-responds in the correct direction.  Does not require literature values —
+Varies three parameters by +/-20% and checks that BEV market share in 2040
+responds in the correct direction.  Does not require literature values --
 validates wiring, not calibration.
 
 Run from the fleet2 root:
@@ -27,7 +27,7 @@ from model import Fleet, get_uncertainty_distributions
 
 
 TARGET_YEAR = 2040
-DELTA       = 0.20   # ±20%
+DELTA       = 0.20   # +/-20%
 
 
 def _baseline():
@@ -57,7 +57,7 @@ def _be_shares(fleet):
 
 
 def _elasticity(share_lo, share_hi, share_base):
-    """Central-difference elasticity: (Δshare/share_base) / (Δparam/param_base)."""
+    """Central-difference elasticity: (dshare/share_base) / (dparam/param_base)."""
     if share_base < 1e-9:
         return float('nan')
     return (share_hi - share_lo) / (share_base * 2 * DELTA)

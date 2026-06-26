@@ -1,5 +1,5 @@
 """
-Strand 2 — Limiting / degenerate cases for fleet2.
+Strand 2 -- Limiting / degenerate cases for fleet2.
 
 Tests boundary conditions in _calculate_market_share() where the expected
 outcome is analytically known, without requiring calibrated parameter values.
@@ -77,7 +77,7 @@ def _run_market_share(powertrains, npvs, price_lambda,
 
 
 # ---------------------------------------------------------------------------
-# Case 1 — equal NPV → uniform shares (1/N)
+# Case 1 -- equal NPV -> uniform shares (1/N)
 # ---------------------------------------------------------------------------
 
 def test_equal_npv_gives_uniform_shares():
@@ -97,12 +97,12 @@ def test_equal_npv_gives_uniform_shares():
 
 
 # ---------------------------------------------------------------------------
-# Case 2 — price_lambda → 0 → uniform shares regardless of NPV spread
+# Case 2 -- price_lambda -> 0 -> uniform shares regardless of NPV spread
 # ---------------------------------------------------------------------------
 
 def test_zero_lambda_gives_uniform_shares():
     """
-    As price_lambda → 0, exp(λ × NPV) → 1 for all powertrains, collapsing
+    As price_lambda -> 0, exp(lam x NPV) -> 1 for all powertrains, collapsing
     the logit to uniform shares regardless of NPV differences.
     """
     powertrains = ['dice', 'be', 'fc']
@@ -116,7 +116,7 @@ def test_zero_lambda_gives_uniform_shares():
 
 
 # ---------------------------------------------------------------------------
-# Case 3 — higher NPV → higher share (correct sign)
+# Case 3 -- higher NPV -> higher share (correct sign)
 # ---------------------------------------------------------------------------
 
 def test_higher_npv_gets_higher_share():
@@ -133,7 +133,7 @@ def test_higher_npv_gets_higher_share():
 
 
 # ---------------------------------------------------------------------------
-# Case 4 — single powertrain gets 100 % of the market
+# Case 4 -- single powertrain gets 100 % of the market
 # ---------------------------------------------------------------------------
 
 def test_single_powertrain_gets_full_market():
@@ -143,7 +143,7 @@ def test_single_powertrain_gets_full_market():
 
 
 # ---------------------------------------------------------------------------
-# Case 5 — non-binding cap leaves shares at their unconstrained logit values
+# Case 5 -- non-binding cap leaves shares at their unconstrained logit values
 # ---------------------------------------------------------------------------
 
 def test_non_binding_cap_leaves_shares_unchanged():
@@ -160,7 +160,7 @@ def test_non_binding_cap_leaves_shares_unchanged():
     exps   = np.exp(lam * np.array(npvs))
     logits = exps / exps.sum()
 
-    # High prev_shares (0.9) and high CAGR (2.0) → cap ≫ logit for all p
+    # High prev_shares (0.9) and high CAGR (2.0) -> cap >> logit for all p
     shares = _run_market_share(
         powertrains, npvs, price_lambda=lam,
         prev_shares=[0.9, 0.9, 0.9],
@@ -174,7 +174,7 @@ def test_non_binding_cap_leaves_shares_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# Case 6 — init_market_limit = 0 caps a powertrain to zero share
+# Case 6 -- init_market_limit = 0 caps a powertrain to zero share
 # ---------------------------------------------------------------------------
 
 def test_zero_init_limit_caps_powertrain_to_zero():
@@ -197,7 +197,7 @@ def test_zero_init_limit_caps_powertrain_to_zero():
 
 
 # ---------------------------------------------------------------------------
-# Case 7 — diesel-only fleet when all other powertrains are excluded
+# Case 7 -- diesel-only fleet when all other powertrains are excluded
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")

@@ -4,9 +4,12 @@ To do:
  - Efficiency boost for long haul.
  - Add diesel tank mass.
 """
+import os
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 MAX_AGE = 25
 AIR_DENSITY = 1.225  # kg/m^3
@@ -43,13 +46,13 @@ PARAMS = {
     },
     'Drive Cycles': {
         'long_haul': {
-            'path': 'param_estimation/energy_consumption/Fleet DNA Long-Haul Representative_.csv',
+            'path': os.path.join(_HERE, 'drive_cycles', 'Fleet DNA Long-Haul Representative_.csv'),
         },
         'regional_haul': {
-           'path': 'param_estimation/energy_consumption/Fleet DNA Regional-Haul Representative_.csv',
+           'path': os.path.join(_HERE, 'drive_cycles', 'Fleet DNA Regional-Haul Representative_.csv'),
         },
         'short_haul': {
-            'path': 'param_estimation/energy_consumption/Fleet DNA Local Delivery Representative_.csv',
+            'path': os.path.join(_HERE, 'drive_cycles', 'Fleet DNA Local Delivery Representative_.csv'),
         }
     },
     "Fuels": { # Recharge efficiency?

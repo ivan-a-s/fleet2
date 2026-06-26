@@ -3,10 +3,10 @@ LCFS policy plots for the fleet2 HDT adoption model.
 
 Comparison plots showing base scenario vs LCFS at $300/tCO2e:
 
-  npv_comparison(fleet_base, fleet_lcfs)   — NPV stacked bars, all powertrains
-  sales_comparison(fleet_base, fleet_lcfs) — new sales by powertrain over time
+  npv_comparison(fleet_base, fleet_lcfs)   -- NPV stacked bars, all powertrains
+  sales_comparison(fleet_base, fleet_lcfs) -- new sales by powertrain over time
 
-Run directly with BC-style LCFS parameters (18.3% → 76% CI reduction, 2025–2050).
+Run directly with BC-style LCFS parameters (18.3% -> 76% CI reduction, 2025-2050).
 """
 import sys, os
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +23,7 @@ from plot_utils import (SAMPLE_YEARS, PT_COLOR, PT_LABELS, K_LABELS,
 
 
 # ---------------------------------------------------------------------------
-# NPV comparison — all powertrains, base (hatched) vs LCFS (solid)
+# NPV comparison -- all powertrains, base (hatched) vs LCFS (solid)
 # ---------------------------------------------------------------------------
 
 def npv_comparison(fleet_base, fleet_lcfs):
@@ -44,7 +44,7 @@ def npv_comparison(fleet_base, fleet_lcfs):
         col = _colours(npv_keys)
 
         fig, ax = plt.subplots(figsize=(14, 8))
-        ax.set_title(f'NPV — {K_LABELS.get(k, k)}  (hatched = base, solid = LCFS)')
+        ax.set_title(f'NPV -- {K_LABELS.get(k, k)}  (hatched = base, solid = LCFS)')
         ax.set_ylabel('$ thousands (NPV-discounted)')
 
         P = fleet_base.P[k]
@@ -86,7 +86,7 @@ def npv_comparison(fleet_base, fleet_lcfs):
 
 
 # ---------------------------------------------------------------------------
-# Sales comparison — all powertrains, base vs LCFS
+# Sales comparison -- all powertrains, base vs LCFS
 # ---------------------------------------------------------------------------
 
 def sales_comparison(fleet_base, fleet_lcfs):

@@ -19,7 +19,7 @@ calendar year.
     D = max_x |F_A(x) - F_B(x)|
 
 D is the maximum vertical gap between the two empirical CDFs.  It lies in [0, 1] and is
-scale-free — no denominator or normalization is needed, so it is immune to near-zero
+scale-free -- no denominator or normalization is needed, so it is immune to near-zero
 lower-tail values and narrow CI bands.  For n i.i.d. samples per half from the same
 distribution, E[D] ~ 0.8/sqrt(n); so the convergence rate is predictable and the
 threshold is directly interpretable: D < 0.05 means the two halves' CDFs agree to within
@@ -31,8 +31,8 @@ If --max-runs is reached before convergence the run completes anyway; a warning 
 
 Output
 ------
-results/<scenario>.npz      — dict of (n_runs, 26) float32 arrays, one per output series
-results/<scenario>_meta.json — n_runs, seed, tol, wall_time_s
+results/<scenario>.npz      -- dict of (n_runs, 26) float32 arrays, one per output series
+results/<scenario>_meta.json -- n_runs, seed, tol, wall_time_s
 """
 import argparse
 import json
@@ -54,7 +54,7 @@ PARALLEL_THRESHOLD = 50   # below this, pool setup cost exceeds any speedup
 _YEARS = np.arange(START_YEAR, END_YEAR + 1)
 _T     = len(_YEARS)      # 26
 
-# Output series monitored for KS convergence — built per vehicle type k by
+# Output series monitored for KS convergence -- built per vehicle type k by
 # _make_convergence_keys().  Covers ZEV adoption, emissions, and cost spread.
 _CONVERGENCE_SUFFIXES = (
     'zev_stock',
@@ -129,7 +129,7 @@ def _extract(fleet):
         for c, arr in fleet.system_costs[k].items():
             out[f'system_costs_{k}_{c}'] = arr.astype(np.float32)
 
-    # Fuel usage — collect unique (k, f) pairs then build dense T-length arrays
+    # Fuel usage -- collect unique (k, f) pairs then build dense T-length arrays
     fuel_pairs = set()
     for k, f, _ in fleet.fuel_usage:
         fuel_pairs.add((k, f))
@@ -152,13 +152,13 @@ def _converged(results: list[dict], tol: float, convergence_keys: list[str]) -> 
     Half-sample two-sample Kolmogorov-Smirnov convergence test.
 
     Split the accumulated results into two equal halves (by order of completion
-    under as_completed — effectively two random subsets).  For each monitored
+    under as_completed -- effectively two random subsets).  For each monitored
     output series and each calendar year t, compute the KS statistic:
 
         D_t = max_x |F_A(x) - F_B(x)|
 
     D is the maximum vertical gap between the two empirical CDFs, always in [0,1].
-    It is scale-free — no normalization needed — and immune to near-zero lower
+    It is scale-free -- no normalization needed -- and immune to near-zero lower
     tails and narrow CI bands that caused instability with percentile-based tests.
 
     For n i.i.d. draws per half from the same distribution: E[D] ~ 0.8/sqrt(n).
@@ -271,7 +271,7 @@ def main(args):
 
     for scenario_name in args.scenarios:
         if scenario_name not in SCENARIOS:
-            print(f'Warning: unknown scenario {scenario_name!r} — skipping')
+            print(f'Warning: unknown scenario {scenario_name!r} -- skipping')
             continue
         policies = SCENARIOS[scenario_name]
 

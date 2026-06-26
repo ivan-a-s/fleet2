@@ -94,7 +94,7 @@ pr.disable()
 prof_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profile.prof")
 pr.dump_stats(prof_path)
 
-# ── Phase summary ─────────────────────────────────────────────────────────────
+# -- Phase summary -------------------------------------------------------------
 # pstats.Stats.stats keys: (filename, lineno, funcname)
 # values: (prim_calls, calls, tottime, cumtime, callers)
 PHASES = ("_build_initial_stock", "_run", "_aggregate")
@@ -123,7 +123,7 @@ print(f"  Vehicles objects in fleet.vehicles : {len(fleet.vehicles)}")
 print(f"  Vehicles objects in fleet.stock    : {len(fleet.stock)}")
 print()
 
-# ── Top 25 by self-time ───────────────────────────────────────────────────────
+# -- Top 25 by self-time -------------------------------------------------------
 print(SEP)
 print("Top 25 functions by self-time (tottime) -where CPU cycles land")
 print(SEP)
@@ -131,7 +131,7 @@ s = io.StringIO()
 pstats.Stats(pr, stream=s).strip_dirs().sort_stats("tottime").print_stats(25)
 print(s.getvalue())
 
-# ── Top 25 by cumulative time ─────────────────────────────────────────────────
+# -- Top 25 by cumulative time -------------------------------------------------
 print(SEP)
 print("Top 25 functions by cumulative time (cumtime) -call-tree weight")
 print(SEP)

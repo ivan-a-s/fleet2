@@ -1,5 +1,5 @@
 """
-Multinomial logit fleet adoption model for heavy-duty trucks (HDT) in BC, 2025–2050.
+Multinomial logit fleet adoption model for heavy-duty trucks (HDT) in BC, 2025-2050.
 
 Architecture
 ------------
@@ -8,12 +8,12 @@ Fleet(), which realises all uncertain parameters at once so shared components (e
 efficiency) receive a single consistent draw.
 
 The simulation proceeds in three layers:
-  1. Vehicles  — one cohort object per (vehicle type k, powertrain p, model year y).
+  1. Vehicles  -- one cohort object per (vehicle type k, powertrain p, model year y).
                  Computes mass, fuel consumption (FASTSim polynomial surrogate), range,
                  annual distance, emissions, capital cost, annual cost, TCO, NPV.
-  2. Fleet     — year-by-year roll-over of surviving cohorts, new vehicle creation, and
+  2. Fleet     -- year-by-year roll-over of surviving cohorts, new vehicle creation, and
                  market-share allocation via multinomial logit with production caps.
-  3. Aggregate — totals over the stock for fuel use, emissions, and system costs.
+  3. Aggregate -- totals over the stock for fuel use, emissions, and system costs.
 
 To do:
  - Size vehicle components for NPV optimisation?
@@ -28,6 +28,7 @@ To do:
  - I can't see an embodied spike for FCETs in vehicle_plots.py
  - Scale factors to relate cost to scale somehow.
  - Policy net revenue plots.
+ - Make sure __main__.py run is with cp=0.5 for all variables.
  Checked up to:
   - _calculate_fuel_consumption
 """
@@ -124,9 +125,9 @@ def set_param_(param, cp):
 
 def set_param(param, cp=0.5, Y=np.arange(START_YEAR - MAX_AGE, END_YEAR + 1)):
     """
-    Convert a cumulative probability cp ∈ [0,1] to a realised parameter value.
-    'linear'  — linearly interpolated array over Y; start and end are themselves distributions.
-    'interp'  — piecewise-linear over specified anchor years, realised at each cp.
+    Convert a cumulative probability cp in [0,1] to a realised parameter value.
+    'linear'  -- linearly interpolated array over Y; start and end are themselves distributions.
+    'interp'  -- piecewise-linear over specified anchor years, realised at each cp.
     Scalar distributions (const/triangle/uniform) are handled by set_param_().
     The same cp is applied to all distribution specs in a single MC run, so correlated
     parameters (e.g. 2025 and 2050 end-points of a cost curve) move together.
@@ -159,7 +160,7 @@ def set_year(input_dict, year=START_YEAR, years=np.arange(START_YEAR - MAX_AGE, 
     Called by select_vehicle_params() so that a Vehicles object sees scalar costs,
     efficiencies, etc. appropriate to its model year rather than full time series.
     Arrays covering age (target_distance, drive_cycle, survival_rate) are excluded
-    from this slicing — they vary by vehicle age, not calendar year.
+    from this slicing -- they vary by vehicle age, not calendar year.
 
     Non-mutating: always returns a new object; the input is never modified.
     This allows select_vehicle_params() to pass in shallow-copied dicts without
@@ -181,16 +182,16 @@ class Vehicles:
     """
     Represents a single vehicle cohort (vehicle type k, powertrain p, model year y).
 
-    params — time-sliced vehicle params from Fleet.select_vehicle_params()
-    fuels  — full (unsliced) fuel params from PARAMS['fuels'], covering all Y years
-    costs  — full (unsliced) vehicle cost arrays from PARAMS['vehicles']['costs']
-    p            — powertrain key string, e.g. 'dice', 'be', 'fc'
-    k            — vehicle type key string, e.g. 'sleeper', 'day_cab', 'straight'
+    params -- time-sliced vehicle params from Fleet.select_vehicle_params()
+    fuels  -- full (unsliced) fuel params from PARAMS['fuels'], covering all Y years
+    costs  -- full (unsliced) vehicle cost arrays from PARAMS['vehicles']['costs']
+    p            -- powertrain key string, e.g. 'dice', 'be', 'fc'
+    k            -- vehicle type key string, e.g. 'sleeper', 'day_cab', 'straight'
     """
 
     def __init__(self, params, fuels, costs, p, k):
         self.params       = params
-        self._all_fuels   = fuels                                    # full dict — needed for en-route fast_charge pricing
+        self._all_fuels   = fuels                                    # full dict -- needed for en-route fast_charge pricing
         self.fuels        = {f: fuels[f] for f in params['fuels']}
         self.costs        = costs
         self.p            = p
@@ -225,7 +226,7 @@ class Vehicles:
             if comp['type'] == 'converter':
                 self.mass[comp_name] = float(comp['mass'])
             elif comp['type'] == 'ess':
-                # ESS mass = specific_mass (kg per unit capacity) × capacity
+                # ESS mass = specific_mass (kg per unit capacity) x capacity
                 self.mass[comp_name] = float(comp['specific_mass']) * float(comp['capacity'])
             elif comp['type'] == 'transmission':
                 self.mass[comp_name] = float(comp['mass'])
@@ -237,7 +238,7 @@ class Vehicles:
         # (the fraction of loads that are weight-limited rather than volume-limited).
         # The ratio (available_headroom / reference_headroom) gives the fractional
         # payload capacity remaining after the heavier drivetrain takes up mass budget.
-        # payload_frac is a scalar — it depends only on unloaded_mass vs the reference mass budget.
+        # payload_frac is a scalar -- it depends only on unloaded_mass vs the reference mass budget.
         # The per-age payload (from drive_cycles) is then scaled by this fraction.
         payload_frac = max(0.0, 1.0 - self.params['p_weighed_out'] * (
             1.0 - (self.params['gvwl'] + gvwl_increase - self.unloaded_mass)
@@ -335,8 +336,8 @@ class Vehicles:
         Compute per-age range (km) as the binding energy-storage constraint across all ESS
         components, and set self.refuel_rate for use in the daily-distance loop.
 
-        Range per ESS = capacity × usable_fraction / fc_tank  [km]
-        where fc_tank = fuel_consumption (source units/km) × refuel_efficiency converts back
+        Range per ESS = capacity x usable_fraction / fc_tank  [km]
+        where fc_tank = fuel_consumption (source units/km) x refuel_efficiency converts back
         to tank/battery units (kWh, kg, L) so that capacity and FC are in commensurable units.
         refuel_efficiency is only relevant to charging losses, not to how far the stored
         energy propels the vehicle.  The binding range is the minimum across all ESS.
@@ -345,7 +346,7 @@ class Vehicles:
         (the constraining tank/battery), so they are always paired with the correct FC in the
         time-budget formula in _calculate_annual_distance.
         For H2 tanks: pump flow rate (kg/hr).
-        For batteries: fast-charger wall power × fast_eff = kW delivered to battery.
+        For batteries: fast-charger wall power x fast_eff = kW delivered to battery.
         """
         battery_fuel = next((f for f in self.fuels if 'charge' in f), None)
         ESS_FUEL = {
@@ -392,27 +393,27 @@ class Vehicles:
         Age-by-age loop: applies battery degradation and range-limited daily distance.
 
         target_distance (km/year) is converted to a daily working-day target:
-          daily_target = annual_km / 365 × (7/5)
+          daily_target = annual_km / 365 x (7/5)
         i.e., trucks are assumed to work 5 days out of 7, so each working day covers
         more than 1/365 of the annual distance.
 
-        When daily_target ≤ range, the vehicle drives the full target.  Otherwise it
+        When daily_target <= range, the vehicle drives the full target.  Otherwise it
         can extend its range with a refuelling/recharging stop using a time-budget formula:
-          achievable = (time_left - 0.25h) × speed × R / (fc × speed + R)
+          achievable = (time_left - 0.25h) x speed x R / (fc x speed + R)
         where time_left = shortfall / speed (hours that would have been spent driving),
         0.25h is the fixed stop overhead, and R = self.refuel_rate.  This is derived by
         solving simultaneously for stop time and extra distance given a fixed time budget.
 
         Battery degradation follows a linear capacity-fade model:
-          effective_range[a] = range[a] × max(0, 1 − deg_per_year×a − deg_per_cycle×cycles)
-        Cycle count accumulates from annual_distance × fuel_consumption / battery_capacity.
+          effective_range[a] = range[a] x max(0, 1 - deg_per_yearxa - deg_per_cyclexcycles)
+        Cycle count accumulates from annual_distance x fuel_consumption / battery_capacity.
 
         self._enroute_distance tracks km driven via en-route fast charging (non-zero only
         for slow-charge BETs when range < target), used in _calculate_annual_cost to apply
         fast-charge pricing to that portion of electricity consumption.
 
         Annual distance is converted back from working-day to calendar-year basis:
-          annual_km = daily_km × (5/7) × 365
+          annual_km = daily_km x (5/7) x 365
         """
         daily_target = self.params['target_distance'] / 365.0 * 7.0 / 5.0
 
@@ -446,7 +447,7 @@ class Vehicles:
                 time_left = shortfall / max(self.average_speed[a], 1.0)
                 fc_a = self.fuel_consumption[self._binding_fuel][a] * binding_refuel_eff
                 if self.refuel_rate > 0 and fc_a > 0:
-                    # Time budget formula: (available_time - 0.25h overhead) × achievable rate
+                    # Time budget formula: (available_time - 0.25h overhead) x achievable rate
                     achievable = max(0.0,
                         (time_left - 0.25) * self.average_speed[a]
                         * self.refuel_rate / (fc_a * self.average_speed[a] + self.refuel_rate)
@@ -471,9 +472,9 @@ class Vehicles:
 
         # Split slow_charge into depot (slow) + en-route (fast) portions so that
         # fuel_usage and emissions reflect which charger type delivered the energy.
-        # Depot portion = (annual_distance − enroute_distance) × fc_slow [grid kWh].
-        # En-route portion = enroute_distance × fc_fast [grid kWh], where
-        #   fc_fast = fc_slow × slow_eff / fast_eff (same battery kWh, more wall losses).
+        # Depot portion = (annual_distance - enroute_distance) x fc_slow [grid kWh].
+        # En-route portion = enroute_distance x fc_fast [grid kWh], where
+        #   fc_fast = fc_slow x slow_eff / fast_eff (same battery kWh, more wall losses).
         if battery_fuel == 'slow_charge' and np.any(self._enroute_distance > 0):
             slow_eff    = float(self.fuels[battery_fuel].get('refuel_efficiency', 1.0))
             fast_data   = self._all_fuels.get('fast_charge', {})
@@ -510,19 +511,19 @@ class Vehicles:
     def _calculate_emissions(self):
         """
         Three emission streams:
-          embodied      — manufacturing emissions (kgCO2e): initial manufacture at age 0;
+          embodied      -- manufacturing emissions (kgCO2e): initial manufacture at age 0;
                           FC stack replacements at their actual replacement ages, if any.
                           Frame/trailer use the shared embodied_emissions (kgCO2e/kg).
                           Converter/transmission components use their own embodied_emissions
                           field (same distribution, falls back to shared factor if absent).
                           ESS components use a dedicated kgCO2e/unit-capacity field.
                           All embodied_emissions distributions share one MC cp ("embodied"
-                          group in data.json) — high/low manufacturing decarbonisation moves
+                          group in data.json) -- high/low manufacturing decarbonisation moves
                           all factors together.
                           Survival is handled by _aggregate (n = surviving vehicle count),
                           so replacement emissions at late ages scale down automatically.
-          emissions_supply — upstream (well-to-tank) emissions per year (kgCO2e/yr).
-          emissions_use    — tailpipe (tank-to-wheel) emissions per year (kgCO2e/yr).
+          emissions_supply -- upstream (well-to-tank) emissions per year (kgCO2e/yr).
+          emissions_use    -- tailpipe (tank-to-wheel) emissions per year (kgCO2e/yr).
                              Zero for ZEVs (no combustion at point of use).
         Supply and use emissions scale with annual_fuel, already in source units/km so
         the emissions intensities (kgCO2e per source unit) apply directly.
@@ -581,14 +582,14 @@ class Vehicles:
         One-time purchase cost broken into labelled components (for plotting).
 
         Components are looked up from vehicles.costs in data.json:
-          engine     — $/unit: hice/dhice use the hydrogen-engine price, all others diesel engine
-          motor      — $/kW × motor capacity
-          battery    — $/kWh × battery capacity (also includes ESS for phe/he)
-          h2_tank    — $/kg × tank capacity
-          fc         — $/kW × fuel-cell capacity
-          tank       — $/L × diesel tank capacity
-          charger    — depots only (not sleeper — sleeper trucks use en-route charging)
-          after_treatment — NOx catalyst; present in data.json for dice, he, phe, dhice
+          engine     -- $/unit: hice/dhice use the hydrogen-engine price, all others diesel engine
+          motor      -- $/kW x motor capacity
+          battery    -- $/kWh x battery capacity (also includes ESS for phe/he)
+          h2_tank    -- $/kg x tank capacity
+          fc         -- $/kW x fuel-cell capacity
+          tank       -- $/L x diesel tank capacity
+          charger    -- depots only (not sleeper -- sleeper trucks use en-route charging)
+          after_treatment -- NOx catalyst; present in data.json for dice, he, phe, dhice
 
         self.capital_total is the scalar sum used in annual_cost['capital'].
         """
@@ -625,18 +626,18 @@ class Vehicles:
         """
         Five cost components, all in $/year as age arrays:
 
-          capital        — full purchase price at age 0, zero thereafter.  Placed here
+          capital        -- full purchase price at age 0, zero thereafter.  Placed here
                            (rather than amortised) so _discount() gives the correct NPV.
-          operational    — maintenance, tyres, etc. proportional to km driven (actual distance).
-          fuel           — fuel cost in source units × time-varying price.
+          operational    -- maintenance, tyres, etc. proportional to km driven (actual distance).
+          fuel           -- fuel cost in source units x time-varying price.
                            For slow-charge BETs with en-route fast charging, km driven via
                            en-route stops are re-billed at fast-charge rates with a different
-                           efficiency: grid_kWh = km × slow_fc × slow_eff / fast_eff.
-          driver         — wage proportional to target_distance (not actual), because the
+                           efficiency: grid_kWh = km x slow_fc x slow_eff / fast_eff.
+          driver         -- wage proportional to target_distance (not actual), because the
                            driver is paid whether or not the vehicle is range-constrained.
-          fc_replacements — time-varying $/kW × stack capacity at each replacement age.
+          fc_replacements -- time-varying $/kW x stack capacity at each replacement age.
 
-        Revenue is also computed here: annual_distance × payload_tonnes × revenue_per_tkm.
+        Revenue is also computed here: annual_distance x payload_tonnes x revenue_per_tkm.
         """
         fuel_cost = np.zeros(len(self.age))
         for f, annual in self.annual_fuel.items():
@@ -644,7 +645,7 @@ class Vehicles:
             idx      = np.clip(self.operation_years - self._Y_start, 0, len(cost_arr) - 1)
             fuel_cost += annual * cost_arr[idx]
 
-        # FC replacement cost (time-varying $/kW × capacity × replacement events)
+        # FC replacement cost (time-varying $/kW x capacity x replacement events)
         fc_comp = self.params['components'].get('fc')
         fc_replacement_cost = np.zeros(len(self.age))
         if fc_comp is not None and np.any(self.fc_replacements > 0):
@@ -668,13 +669,13 @@ class Vehicles:
         )
 
     def _discount(self, annual):
-        """Survival-weighted NPV: Σ_a  annual[a] × survival_rate[a] / (1+r)^a."""
+        """Survival-weighted NPV: sum_a  annual[a] x survival_rate[a] / (1+r)^a."""
         return float(np.sum(np.asarray(annual) * self._discount_factor))
 
     def _calculate_tco_npv(self):
         """
         TCO = NPV sum of all cost components (capital + operating + fuel + driver + FC stack).
-        NPV = NPV(revenue) − TCO.
+        NPV = NPV(revenue) - TCO.
 
         A higher NPV signals a more profitable vehicle from the operator's perspective and is
         the utility term that drives multinomial logit market-share allocation in Fleet.
@@ -749,7 +750,7 @@ class Fleet:
 
         Non-ZEV powertrains incur `penalty` $/vehicle/yr (at age 0).
         ZEV powertrains receive a rebate scaled so that total payments balance:
-            rebate = penalty × (1 − p_zev) / max(p_zev, ε)
+            rebate = penalty x (1 - p_zev) / max(p_zev, eps)
         capped at `penalty` to avoid exploding rebates when p_zev is tiny.
         """
         rebate = min(penalty, penalty * max(1.0 - p_zev, 0.0) / max(p_zev, 1e-9))
@@ -770,11 +771,11 @@ class Fleet:
 
         Sizing formula for cohort y (y < START_YEAR):
             stock[k, dice, y, START_YEAR] = activity_req[k, START_YEAR]
-                                            × (1 + growth_rate)^(y - START_YEAR)
-                                            × survival_rate[START_YEAR - y]
+                                            x (1 + growth_rate)^(y - START_YEAR)
+                                            x survival_rate[START_YEAR - y]
                                             / denom
 
-        denom = Σ_a  annual_distance[a] × payload[a]/1000 × survival_rate[a] × (1 + growth_rate)^(-a)
+        denom = sum_a  annual_distance[a] x payload[a]/1000 x survival_rate[a] x (1 + growth_rate)^(-a)
         is the survival-and-growth-weighted t-km per vehicle over a full MAX_AGE lifespan.
         Dividing by denom converts a total activity target into a number of vehicles per cohort.
 
@@ -785,7 +786,7 @@ class Fleet:
             for y in range(START_YEAR - MAX_AGE, START_YEAR):
                 self.vehicles[k, 'dice', y] = self._make_vehicle(k, 'dice', y)
 
-            # Fixed reference vehicle (oldest vintage) for denominator — matches old model
+            # Fixed reference vehicle (oldest vintage) for denominator -- matches old model
             v_ref   = self.vehicles[k, 'dice', START_YEAR - MAX_AGE]
             surv_r  = v_ref.params['survival_rate']
             denom   = sum(v_ref.annual_distance[a] * float(np.asarray(v_ref.mass['payload'])[a]) / 1000.0
@@ -804,7 +805,7 @@ class Fleet:
 
     def _run(self):
         """
-        Year-by-year simulation START_YEAR → END_YEAR.  Each year has three steps:
+        Year-by-year simulation START_YEAR -> END_YEAR.  Each year has three steps:
 
         1. Roll-over: surviving vehicles from t-1 advance one year.  Stock is scaled by
            the conditional survival ratio  survival_rate[a] / survival_rate[a-1]  rather
@@ -900,7 +901,7 @@ class Fleet:
                         prev_pen = penalty
                         penalty  = new_pen
                         if abs(penalty - prev_pen) < 1.0:
-                            break  # penalty converged; production cap is binding — accept best achievable share
+                            break  # penalty converged; production cap is binding -- accept best achievable share
                     else:
                         warnings.warn(
                             f"ZEV mandate (per_k={k!r}) did not converge at year {t}: "
@@ -960,7 +961,7 @@ class Fleet:
                     prev_pen = penalty
                     penalty  = new_pen
                     if abs(penalty - prev_pen) < 1.0:
-                        break  # penalty converged; production cap is binding — accept best achievable share
+                        break  # penalty converged; production cap is binding -- accept best achievable share
                 else:
                     if active:
                         warnings.warn(
@@ -977,10 +978,10 @@ class Fleet:
         Multinomial logit with iterative production-cap enforcement.
 
         Unconstrained logit share for powertrain p:
-            share(p) = exp(λ × NPV(p)) / Σ_q exp(λ × NPV(q))
+            share(p) = exp(lam x NPV(p)) / sum_q exp(lam x NPV(q))
 
-        where λ = price_lambda (controls sensitivity to NPV differences; higher λ → winner-takes-
-        all, λ → 0 → uniform shares).
+        where lam = price_lambda (controls sensitivity to NPV differences; higher lam -> winner-takes-
+        all, lam -> 0 -> uniform shares).
 
         Production cap: nascent technologies cannot grow faster than their supply chain allows.
         _market_share_limit() returns the maximum achievable share given last year's share and
@@ -1006,7 +1007,7 @@ class Fleet:
                 else:
                     self.market_share[k, p, t] = logit
             if len(remaining) == n_prev:
-                break  # Converged — no new production-limited powertrains
+                break  # Converged -- no new production-limited powertrains
 
     def _aggregate(self):
         """
@@ -1066,10 +1067,10 @@ class Fleet:
         Build the params dict for a single (vehicle type k, powertrain p, model year y) cohort.
 
         Three-step merge:
-          1. Start with shared params for vehicle type k (base_cost, running_cost, payload, …).
+          1. Start with shared params for vehicle type k (base_cost, running_cost, payload, ...).
           2. Overlay powertrain-specific params (|= lets powertrain values win on conflicts).
           3. For each component referenced in the powertrain, fill in shared component specs
-             from vehicles.components[type][comp_name] — but only for keys not already set
+             from vehicles.components[type][comp_name] -- but only for keys not already set
              by the powertrain (so per-powertrain overrides are preserved).
 
         Then set_year() slices all time-varying arrays to scalar values at year y.
@@ -1102,14 +1103,14 @@ class Fleet:
         """
         Apply a Monte Carlo draw to every uncertain parameter in the params tree.
 
-        param_cps maps (key_path_tuple) → cp ∈ [0, 1].  Key paths are produced by
+        param_cps maps (key_path_tuple) -> cp in [0, 1].  Key paths are produced by
         get_uncertainty_distributions(), which walks the nested params dict and returns
         every leaf that has a 'dist' key.
 
         set_param() converts the cumulative probability cp to a realised value (scalar
         or time-series array depending on the distribution type).  Because a single cp
-        is shared across all parameters in one MC run, correlated quantities — e.g. the
-        same component parameter used by multiple powertrains — move together.
+        is shared across all parameters in one MC run, correlated quantities -- e.g. the
+        same component parameter used by multiple powertrains -- move together.
         """
         for keys, cp in param_cps.items():
             d = self.params

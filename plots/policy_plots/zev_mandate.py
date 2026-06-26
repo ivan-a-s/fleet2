@@ -4,8 +4,8 @@ ZEV mandate policy plots for the fleet2 HDT adoption model.
 Comparison plots showing base scenario vs ZEV mandate (30% by 2030, 100% by 2050,
 fleet-wide scope, $200k/vehicle max penalty):
 
-  npv_comparison(fleet_base, fleet_mandate)   — NPV stacked bars, all powertrains
-  sales_comparison(fleet_base, fleet_mandate) — new sales by powertrain over time
+  npv_comparison(fleet_base, fleet_mandate)   -- NPV stacked bars, all powertrains
+  sales_comparison(fleet_base, fleet_mandate) -- new sales by powertrain over time
 
 Run directly to show all comparison plots.
 """
@@ -25,7 +25,7 @@ from plot_utils import (SAMPLE_YEARS, PT_COLOR, PT_LABELS, K_LABELS,
 
 
 # ---------------------------------------------------------------------------
-# NPV comparison — all powertrains, base (hatched) vs mandate (solid)
+# NPV comparison -- all powertrains, base (hatched) vs mandate (solid)
 # ---------------------------------------------------------------------------
 
 def npv_comparison(fleet_base, fleet_mandate):
@@ -45,7 +45,7 @@ def npv_comparison(fleet_base, fleet_mandate):
         col = _colours(npv_keys)
 
         fig, ax = plt.subplots(figsize=(14, 8))
-        ax.set_title(f'NPV — {K_LABELS.get(k, k)}  (hatched = base, solid = mandate)')
+        ax.set_title(f'NPV -- {K_LABELS.get(k, k)}  (hatched = base, solid = mandate)')
         ax.set_ylabel('$ thousands (NPV-discounted)')
 
         P = fleet_base.P[k]
@@ -87,7 +87,7 @@ def npv_comparison(fleet_base, fleet_mandate):
 
 
 # ---------------------------------------------------------------------------
-# Sales comparison — all powertrains, base vs mandate
+# Sales comparison -- all powertrains, base vs mandate
 # ---------------------------------------------------------------------------
 
 def sales_comparison(fleet_base, fleet_mandate):

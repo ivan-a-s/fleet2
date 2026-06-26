@@ -5,7 +5,7 @@ To do:
 import numpy as np
 from multiprocessing import Pool
 import pickle
-from model import *
+from model_old import *
 import copy
 
 # Policy packages
@@ -163,7 +163,7 @@ policy_packages = {
     # },
     'Foresight': {
         'Carbon Tax': CarbonTax(years=params['Years']['Y'], price={'2025': 0, '2030': 0, '2050': 0}),
-        'LCFS': LFCS(params, credit_price=0, start=0.0, end=0.0),
+        'LCFS': LCFS(params, credit_price=0, start=0.0, end=0.0),
         'Autonomous Permits': AutonomousPermits({
             'D': 0,
             'DHNP': 0,

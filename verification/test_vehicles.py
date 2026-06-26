@@ -1,8 +1,8 @@
 """
-Strand 1 — Unit tests on Vehicles methods.
+Strand 1 -- Unit tests on Vehicles methods.
 
 Uses a real Fleet run at median params rather than constructing minimal
-params dicts from scratch — avoids fragile fixture plumbing and tests
+params dicts from scratch -- avoids fragile fixture plumbing and tests
 against the actual calibrated model.
 
 Run from the fleet2 root:
@@ -49,21 +49,21 @@ def test_unloaded_mass_positive(vehicles):
 
 
 def test_total_mass_exceeds_unloaded(vehicles):
-    """Payload adds mass at every age — total_mass must never fall below unloaded."""
+    """Payload adds mass at every age -- total_mass must never fall below unloaded."""
     for (k, p), v in vehicles.items():
         assert np.all(v.total_mass >= v.unloaded_mass), \
             f"total_mass < unloaded_mass: k={k}, p={p}"
 
 
 def test_sleeper_diesel_mass_in_plausible_range(fleet):
-    """Sleeper diesel loaded mass should be 20–55 t (literature target: 36–40 t)."""
+    """Sleeper diesel loaded mass should be 20-55 t (literature target: 36-40 t)."""
     v = fleet.vehicles['sleeper', 'dice', START_YEAR]
     assert 20_000 <= v.total_mass[0] <= 55_000, \
-        f"Sleeper diesel mass implausible: {v.total_mass[0] / 1000:.1f} t (expect 36–40 t)"
+        f"Sleeper diesel mass implausible: {v.total_mass[0] / 1000:.1f} t (expect 36-40 t)"
 
 
 def test_zev_payload_positive(fleet):
-    """ZEV payload must be positive. Comparison to diesel is omitted — ZEVs may
+    """ZEV payload must be positive. Comparison to diesel is omitted -- ZEVs may
     carry more payload than diesel once GVWL exemptions are introduced."""
     for k in fleet.K:
         for p in ('be', 'fc'):
@@ -164,7 +164,7 @@ def test_annual_distance_positive(vehicles):
 
 def test_annual_distance_does_not_exceed_target(vehicles):
     """
-    Annual km cannot exceed the target even with en-route stops — the time
+    Annual km cannot exceed the target even with en-route stops -- the time
     budget is fixed.  Allow 1 % margin for floating-point.
     """
     for (k, p), v in vehicles.items():
@@ -231,8 +231,8 @@ def test_supply_emissions_nonnegative(vehicles):
 
 def test_discount_matches_survival_weighted_formula(fleet):
     """
-    _discount(constant C) must equal C × Σ_a survival_rate[a] / (1+r)^a
-    — the exact formula from the docstring.
+    _discount(constant C) must equal C x sum_a survival_rate[a] / (1+r)^a
+    -- the exact formula from the docstring.
     """
     v        = fleet.vehicles['sleeper', 'dice', START_YEAR]
     C        = 10_000.0
@@ -263,9 +263,9 @@ def test_npv_equals_discounted_revenue_minus_tco(vehicles):
 
 def test_diesel_tco_in_plausible_range(fleet):
     """
-    Sleeper diesel TCO should be $200k–$2M in 2025 CAD
-    (literature target: $350k–$600k; wide bounds accommodate parameter uncertainty).
+    Sleeper diesel TCO should be $200k-$2M in 2025 CAD
+    (literature target: $350k-$600k; wide bounds accommodate parameter uncertainty).
     """
     v = fleet.vehicles['sleeper', 'dice', START_YEAR]
     assert 200_000 <= v.tco <= 2_000_000, \
-        f"Sleeper diesel TCO implausible: ${v.tco:,.0f} (expect ~$350k–$600k)"
+        f"Sleeper diesel TCO implausible: ${v.tco:,.0f} (expect ~$350k-$600k)"

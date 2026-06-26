@@ -1,5 +1,5 @@
 """
-Strand 3 — Stock-flow consistency checks for fleet2.
+Strand 3 -- Stock-flow consistency checks for fleet2.
 
 Asserts six accounting identities at every simulated year, using a single
 deterministic Fleet run (all uncertain parameters at median, cp=0.5).
@@ -33,7 +33,7 @@ def fleet():
 
 
 # ---------------------------------------------------------------------------
-# Identity 1 — total_stock matches the sum of individual cohort stocks
+# Identity 1 -- total_stock matches the sum of individual cohort stocks
 # ---------------------------------------------------------------------------
 
 def test_total_stock_equals_cohort_sum(fleet):
@@ -56,12 +56,12 @@ def test_total_stock_equals_cohort_sum(fleet):
 
 
 # ---------------------------------------------------------------------------
-# Identity 2 — sales equal the age-0 cohort stock in the same year
+# Identity 2 -- sales equal the age-0 cohort stock in the same year
 # ---------------------------------------------------------------------------
 
 def test_sales_equal_age_zero_stock(fleet):
     """
-    sales[k, p, t] must equal stock[k, p, t, t] — i.e. the new cohort
+    sales[k, p, t] must equal stock[k, p, t, t] -- i.e. the new cohort
     purchased in year t.  Both are derived from the same dict entry.
     """
     for k in fleet.K:
@@ -76,7 +76,7 @@ def test_sales_equal_age_zero_stock(fleet):
 
 
 # ---------------------------------------------------------------------------
-# Identity 3 — fleet delivers the required activity every year
+# Identity 3 -- fleet delivers the required activity every year
 # ---------------------------------------------------------------------------
 
 def test_fleet_meets_activity_requirement(fleet):
@@ -99,14 +99,14 @@ def test_fleet_meets_activity_requirement(fleet):
             npt.assert_allclose(
                 activity_total, required, rtol=1e-2,
                 err_msg=(
-                    f"activity gap: k={k}, t={t} — "
+                    f"activity gap: k={k}, t={t} -- "
                     f"delivered={activity_total:.1f}, required={required:.1f}"
                 ),
             )
 
 
 # ---------------------------------------------------------------------------
-# Identity 4 — fuel_usage matches the cohort-level aggregation
+# Identity 4 -- fuel_usage matches the cohort-level aggregation
 # ---------------------------------------------------------------------------
 
 def test_fuel_usage_matches_cohort_aggregation(fleet):
@@ -142,7 +142,7 @@ def test_fuel_usage_matches_cohort_aggregation(fleet):
 
 
 # ---------------------------------------------------------------------------
-# Identity 5 — emissions totals match the cohort aggregation
+# Identity 5 -- emissions totals match the cohort aggregation
 # ---------------------------------------------------------------------------
 
 def test_emissions_match_cohort_aggregation(fleet):
@@ -174,7 +174,7 @@ def test_emissions_match_cohort_aggregation(fleet):
 
 
 # ---------------------------------------------------------------------------
-# Identity 6 — market shares sum to 1
+# Identity 6 -- market shares sum to 1
 # ---------------------------------------------------------------------------
 
 def test_market_shares_sum_to_one(fleet):
@@ -192,7 +192,7 @@ def test_market_shares_sum_to_one(fleet):
 
 
 # ---------------------------------------------------------------------------
-# Identity 7 — rollover applies the correct conditional survival ratio
+# Identity 7 -- rollover applies the correct conditional survival ratio
 # ---------------------------------------------------------------------------
 
 def test_rollover_applies_conditional_survival(fleet):

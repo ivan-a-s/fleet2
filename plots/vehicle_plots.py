@@ -9,7 +9,7 @@ Two groups of plots, mirroring the old Vehicle.Plots and Fleet.Plots:
       range, annual_distance, emissions, annual_costs.
 
   cross_powertrain(fleet, k)
-      Stacked-bar per powertrain × sample year.
+      Stacked-bar per powertrain x sample year.
       Mirrors old Fleet.Plots: vehicle_mass, capital_cost, tco, lca_emissions.
 
 Run this file directly to show all plots for all vehicle types.
@@ -27,7 +27,7 @@ from plot_utils import (SAMPLE_YEARS, PT_COLOR, PT_LABELS, K_LABELS,
 
 
 # ---------------------------------------------------------------------------
-# Age profiles — all powertrains on one figure, vs vehicle age
+# Age profiles -- all powertrains on one figure, vs vehicle age
 # ---------------------------------------------------------------------------
 
 def age_profiles(fleet, k='sleeper', y=START_YEAR):
@@ -37,7 +37,7 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
 
     # Survival rate
     fig, ax = plt.subplots()
-    ax.set_title(f'Survival rate — {K_LABELS.get(k, k)} {y}')
+    ax.set_title(f'Survival rate -- {K_LABELS.get(k, k)} {y}')
     ax.set_xlabel('Vehicle age (years)')
     ax.set_ylabel('Survival rate')
     for p in P:
@@ -50,7 +50,7 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
 
     # Average speed
     fig, ax = plt.subplots()
-    ax.set_title(f'Average speed — {K_LABELS.get(k, k)} {y}')
+    ax.set_title(f'Average speed -- {K_LABELS.get(k, k)} {y}')
     ax.set_xlabel('Vehicle age (years)')
     ax.set_ylabel('km/h')
     for p in P:
@@ -61,9 +61,9 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
     ax.set_ylim(0, None)
     ax.legend()
 
-    # Fuel consumption — one line per fuel per powertrain
+    # Fuel consumption -- one line per fuel per powertrain
     fig, ax = plt.subplots()
-    ax.set_title(f'Fuel consumption — {K_LABELS.get(k, k)} {y}')
+    ax.set_title(f'Fuel consumption -- {K_LABELS.get(k, k)} {y}')
     ax.set_xlabel('Vehicle age (years)')
     ax.set_ylabel('L or kg or kWh per km')
     for p in P:
@@ -78,7 +78,7 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
 
     # Range
     fig, ax = plt.subplots()
-    ax.set_title(f'Range — {K_LABELS.get(k, k)} {y}')
+    ax.set_title(f'Range -- {K_LABELS.get(k, k)} {y}')
     ax.set_xlabel('Vehicle age (years)')
     ax.set_ylabel('km')
     for p in P:
@@ -91,7 +91,7 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
 
     # Annual distance (actual vs target)
     fig, ax = plt.subplots()
-    ax.set_title(f'Annual distance — {K_LABELS.get(k, k)} {y}')
+    ax.set_title(f'Annual distance -- {K_LABELS.get(k, k)} {y}')
     ax.set_xlabel('Vehicle age (years)')
     ax.set_ylabel('km / year')
     for p in P:
@@ -105,7 +105,7 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
 
     # Emissions vs age
     fig, ax = plt.subplots()
-    ax.set_title(f'Annual emissions — {K_LABELS.get(k, k)} {y}')
+    ax.set_title(f'Annual emissions -- {K_LABELS.get(k, k)} {y}')
     ax.set_xlabel('Vehicle age (years)')
     ax.set_ylabel('tCO2e / year')
     for p in P:
@@ -118,9 +118,9 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
     ax.set_ylim(0, None)
     ax.legend(fontsize=7)
 
-    # Annual costs vs age — total only
+    # Annual costs vs age -- total only
     fig, ax = plt.subplots()
-    ax.set_title(f'Annual costs — {K_LABELS.get(k, k)} {y}')
+    ax.set_title(f'Annual costs -- {K_LABELS.get(k, k)} {y}')
     ax.set_xlabel('Vehicle age (years)')
     ax.set_ylabel('$ thousands / year')
     for p in P:
@@ -134,7 +134,7 @@ def age_profiles(fleet, k='sleeper', y=START_YEAR):
 
 
 # ---------------------------------------------------------------------------
-# Cross-powertrain stacked bars — all powertrains × sample years
+# Cross-powertrain stacked bars -- all powertrains x sample years
 # ---------------------------------------------------------------------------
 
 def _iter_pys(fleet, k):
@@ -147,7 +147,7 @@ def _iter_pys(fleet, k):
 
 def vehicle_mass(fleet, k='sleeper'):
     fig, ax = plt.subplots(figsize=(14, 8))
-    ax.set_title(f'Vehicle mass — {K_LABELS.get(k, k)}')
+    ax.set_title(f'Vehicle mass -- {K_LABELS.get(k, k)}')
     ax.set_ylabel('kg')
     keys = _unique_keys(fleet, k, 'mass')
     col  = _colours(keys)
@@ -161,7 +161,7 @@ def vehicle_mass(fleet, k='sleeper'):
 
 def capital_cost(fleet, k='sleeper'):
     fig, ax = plt.subplots(figsize=(14, 8))
-    ax.set_title(f'Capital cost — {K_LABELS.get(k, k)}')
+    ax.set_title(f'Capital cost -- {K_LABELS.get(k, k)}')
     ax.set_ylabel('$ thousands')
     keys = _unique_keys(fleet, k, 'capital')
     col  = _colours(keys)
@@ -176,7 +176,7 @@ def capital_cost(fleet, k='sleeper'):
 
 def tco(fleet, k='sleeper'):
     fig, ax = plt.subplots(figsize=(14, 8))
-    ax.set_title(f'TCO breakdown — {K_LABELS.get(k, k)}')
+    ax.set_title(f'TCO breakdown -- {K_LABELS.get(k, k)}')
     ax.set_ylabel('$ thousands (NPV-discounted)')
     keys = _unique_keys(fleet, k, 'annual_cost')
     col  = _colours(keys)
@@ -191,7 +191,7 @@ def tco(fleet, k='sleeper'):
 
 def lca_emissions(fleet, k='sleeper'):
     fig, ax = plt.subplots(figsize=(14, 8))
-    ax.set_title(f'Lifetime LCA emissions — {K_LABELS.get(k, k)}')
+    ax.set_title(f'Lifetime LCA emissions -- {K_LABELS.get(k, k)}')
     ax.set_ylabel('tCO2e (survival-weighted)')
     lca_keys = ['embodied', 'supply', 'use']
     col      = _colours(lca_keys)
@@ -212,7 +212,7 @@ def lca_emissions(fleet, k='sleeper'):
 
 def npv(fleet, k='sleeper'):
     fig, ax = plt.subplots(figsize=(14, 8))
-    ax.set_title(f'NPV breakdown — {K_LABELS.get(k, k)}')
+    ax.set_title(f'NPV breakdown -- {K_LABELS.get(k, k)}')
     ax.set_ylabel('$ thousands (NPV-discounted)')
     npv_keys = ['revenue'] + _unique_keys(fleet, k, 'annual_cost')
     col      = _colours(npv_keys)

@@ -24,7 +24,7 @@ from data import PARAMS
 from model import Fleet, get_uncertainty_distributions
 
 SNAPSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'snapshot.npz')
-RTOL = 1e-4   # 0.01% tolerance — enough to catch real changes, ignores float32 noise
+RTOL = 1e-4   # 0.01% tolerance -- enough to catch real changes, ignores float32 noise
 
 
 def _run():

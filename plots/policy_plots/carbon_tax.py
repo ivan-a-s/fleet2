@@ -3,10 +3,10 @@ Carbon tax policy plots for the fleet2 HDT adoption model.
 
 Shows how a carbon tax affects vehicle economics and fleet composition:
 
-  npv_by_powertrain(fleet)   — stacked bar NPV breakdown per powertrain × sample year
-  system_costs(fleet)        — fleet system costs line chart (same style as fleet_plots)
-  sales_by_powertrain(fleet) — new sales by powertrain over time
-  stock_by_powertrain(fleet) — total stock by powertrain over time
+  npv_by_powertrain(fleet)   -- stacked bar NPV breakdown per powertrain x sample year
+  system_costs(fleet)        -- fleet system costs line chart (same style as fleet_plots)
+  sales_by_powertrain(fleet) -- new sales by powertrain over time
+  stock_by_powertrain(fleet) -- total stock by powertrain over time
 
 Run directly with an illustrative BC-style carbon tax trajectory.
 """
@@ -24,18 +24,18 @@ from plot_utils import Plotting, PT_COLOR, COST_COLOR
 
 
 # ---------------------------------------------------------------------------
-# NPV by powertrain — stacked bar (same style as vehicle_plots.npv)
+# NPV by powertrain -- stacked bar (same style as vehicle_plots.npv)
 # ---------------------------------------------------------------------------
 
 def npv_by_powertrain(fleet):
-    """Stacked bar NPV breakdown per powertrain × sample year, one figure per vehicle type."""
+    """Stacked bar NPV breakdown per powertrain x sample year, one figure per vehicle type."""
     from vehicle_plots import npv as _npv
     for k in fleet.K:
         _npv(fleet, k=k)
 
 
 # ---------------------------------------------------------------------------
-# System costs — line chart (same style as fleet_plots)
+# System costs -- line chart (same style as fleet_plots)
 # ---------------------------------------------------------------------------
 
 def system_costs(fleet):

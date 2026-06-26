@@ -4,9 +4,9 @@ ZEV GVWL exemption policy plots for the fleet2 HDT adoption model.
 Comparison plots showing base scenario vs ZEV GVWL exemption (BC defaults:
 sleeper +5000 kg, day_cab +3000 kg, straight +2000 kg):
 
-  npv_comparison(fleet_base, fleet_gvwl)       — NPV stacked bars, ZEV powertrains only
-  fuel_consumption_zev(fleet_base, fleet_gvwl) — fuel consumption vs age, ZEV powertrains only
-  sales_comparison(fleet_base, fleet_gvwl)     — new sales by powertrain over time
+  npv_comparison(fleet_base, fleet_gvwl)       -- NPV stacked bars, ZEV powertrains only
+  fuel_consumption_zev(fleet_base, fleet_gvwl) -- fuel consumption vs age, ZEV powertrains only
+  sales_comparison(fleet_base, fleet_gvwl)     -- new sales by powertrain over time
 
 Run directly to show all comparison plots.
 """
@@ -27,7 +27,7 @@ _ZEV_P = ['be', 'fc', 'hice']
 
 
 # ---------------------------------------------------------------------------
-# NPV comparison — ZEV powertrains only, base (hatched) vs GVWL (solid)
+# NPV comparison -- ZEV powertrains only, base (hatched) vs GVWL (solid)
 # ---------------------------------------------------------------------------
 
 def npv_comparison(fleet_base, fleet_gvwl):
@@ -52,7 +52,7 @@ def npv_comparison(fleet_base, fleet_gvwl):
         col = _colours(npv_keys)
 
         fig, ax = plt.subplots(figsize=(14, 8))
-        ax.set_title(f'NPV — ZEV powertrains — {K_LABELS.get(k, k)}'
+        ax.set_title(f'NPV -- ZEV powertrains -- {K_LABELS.get(k, k)}'
                      '  (hatched = base, solid = GVWL)')
         ax.set_ylabel('$ thousands (NPV-discounted)')
 
@@ -94,7 +94,7 @@ def npv_comparison(fleet_base, fleet_gvwl):
 
 
 # ---------------------------------------------------------------------------
-# Fuel consumption — ZEV powertrains, base vs GVWL, vs vehicle age
+# Fuel consumption -- ZEV powertrains, base vs GVWL, vs vehicle age
 # ---------------------------------------------------------------------------
 
 def fuel_consumption_zev(fleet_base, fleet_gvwl):
@@ -104,7 +104,7 @@ def fuel_consumption_zev(fleet_base, fleet_gvwl):
     fig, axes = plt.subplots(1, len(K), figsize=(4 * len(K), 3.5), sharex=True, sharey=True,
                               constrained_layout=True, dpi=150)
     axes = np.atleast_1d(axes)
-    fig.suptitle(f'Fuel consumption — ZEV powertrains {START_YEAR} cohort'
+    fig.suptitle(f'Fuel consumption -- ZEV powertrains {START_YEAR} cohort'
                  '  (solid = base, dashed = GVWL)')
 
     all_handles, all_labels = [], []
@@ -132,7 +132,7 @@ def fuel_consumption_zev(fleet_base, fleet_gvwl):
 
 
 # ---------------------------------------------------------------------------
-# Sales comparison — all powertrains, base vs GVWL
+# Sales comparison -- all powertrains, base vs GVWL
 # ---------------------------------------------------------------------------
 
 def sales_comparison(fleet_base, fleet_gvwl):

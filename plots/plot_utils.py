@@ -21,14 +21,14 @@ PT_COLOR = {p: _CYCLE[i % len(_CYCLE)]
             for i, p in enumerate(['dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'])}
 
 # MJ of useful (traction) energy per unit of fuel consumed.
-# Diesel/H2: LHV × powertrain efficiency. Electric: 3.6 MJ/kWh × drivetrain efficiency.
+# Diesel/H2: LHV x powertrain efficiency. Electric: 3.6 MJ/kWh x drivetrain efficiency.
 # h2 efficiency uses FC (~60%); hice/dhice are a minor share so the error is small.
 FUEL_TO_MJ = {
-    'diesel':      35.8 * 0.43,   # L   → 15.4 MJ
-    'h2':         120.0 * 0.60,   # kg  → 72.0 MJ
+    'diesel':      35.8 * 0.43,   # L   -> 15.4 MJ
+    'h2':         120.0 * 0.60,   # kg  -> 72.0 MJ
     'h2_p':       120.0 * 0.60,
     'h2_pe':      120.0 * 0.60,
-    'slow_charge':  3.6 * 0.90,   # kWh →  3.2 MJ
+    'slow_charge':  3.6 * 0.90,   # kWh ->  3.2 MJ
     'fast_charge':  3.6 * 0.90,
 }
 
@@ -71,7 +71,7 @@ K_LABELS = {
     'straight': 'Straight',
 }
 
-# Merged display labels — covers powertrains, vehicle types, cost/emission keys
+# Merged display labels -- covers powertrains, vehicle types, cost/emission keys
 DISPLAY_LABELS = {
     **PT_LABELS,
     **K_LABELS,
@@ -94,14 +94,14 @@ KEY_LABELS = {
     'battery':                 'Battery',
     'fc':                      'Fuel Cell',
     'diesel_tank':             'Diesel Tank',
-    'h2_700bar':               'H₂ Tank (700 bar)',
-    'h2_350bar':               'H₂ Tank (350 bar)',
+    'h2_700bar':               'H2 Tank (700 bar)',
+    'h2_350bar':               'H2 Tank (350 bar)',
     'electronic_controller':   'Electronic Controller',
     'combustion_transmission': 'Combustion Transmission',
     'electric_transmission':   'Electric Transmission',
     'after_treatment':         'Aftertreatment',
     'engine':                  'Engine',
-    'h2_tank':                 'H₂ Tank',
+    'h2_tank':                 'H2 Tank',
     'tank':                    'Diesel Tank',
     'charger':                 'Charger',
     'capital':                 'Capital',
@@ -142,7 +142,7 @@ def _bar_layout(n, year_gap=5, fill=0.80, internal_gap=0.10):
     return width, offsets
 
 def _stacked_bar(ax, x, comps, width, col):
-    """Stacked bar using pre-built name→color dict col."""
+    """Stacked bar using pre-built name->color dict col."""
     bottom = 0.0
     for key, val in comps.items():
         val = float(np.asarray(val).flat[0])
@@ -159,7 +159,7 @@ def _legend(ax, keys, col, **kw):
     ax.legend(handles, labels, **kw)
 
 # ---------------------------------------------------------------------------
-# Plotting class — fleet-level line/area layouts
+# Plotting class -- fleet-level line/area layouts
 # ---------------------------------------------------------------------------
 
 class Plotting:
@@ -185,7 +185,7 @@ class Plotting:
         """
         Plot each category in result as a line.
         If v is 1-D (single run): plain line.
-        If v is 2-D (MC, axis-0 = runs): mean line + p5–p95 fill band.
+        If v is 2-D (MC, axis-0 = runs): mean line + p5-p95 fill band.
         Returns the local y-axis maximum for shared-axis sizing.
         """
         local_max = 0

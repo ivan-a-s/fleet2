@@ -22,8 +22,10 @@ import cProfile
 import pstats
 import pickle
 
-# Local imports
-import data as d
+# Local imports — ensure old/ is on sys.path so interactive window runs work
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import data_old as d
 
 # Physical parameters
 AIR_DENSITY = 1.225  # kg/m^3
@@ -1333,7 +1335,7 @@ if __name__ == "__main__":
         #     penalty=30_000,
         #     rebates=False,
         # ),
-        zev_rebate=0.33
+        # zev_rebate=0.33
     )
 
     plots = fleet.Plots(fleet)

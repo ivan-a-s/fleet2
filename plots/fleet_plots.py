@@ -1,17 +1,17 @@
 """
 Fleet-level plots for the fleet2 HDT adoption model.
 
-extract_outputs(fleet) — pulls fleet results into a plain dict of arrays.
+extract_outputs(fleet) -- pulls fleet results into a plain dict of arrays.
     For a single run each leaf is a 1-D array over years.
     After Monte Carlo, stack n_runs results with merge_outputs() and each
-    leaf becomes a 2-D array (n_runs × n_years); Plotting handles both shapes.
+    leaf becomes a 2-D array (n_runs x n_years); Plotting handles both shapes.
 
-Plotting class — mirrors the style of Paper 1's parallel_test.py:
+Plotting class -- mirrors the style of Paper 1's parallel_test.py:
     plot_by_both(result, ...)  one subplot per vehicle type k, one line per category
     plot_by_inner(result, ...) single plot, summed across k, one line per category
-    plot_lines(...)            mean line + p5–p95 fill (fill omitted for single runs)
+    plot_lines(...)            mean line + p5-p95 fill (fill omitted for single runs)
 
-merge_outputs(list_of_dicts) — stacks a list of single-run dicts into MC arrays.
+merge_outputs(list_of_dicts) -- stacks a list of single-run dicts into MC arrays.
 
 Run directly to show all plots for a single deterministic run.
 """
@@ -70,7 +70,7 @@ def extract_outputs(fleet):
         'Fuel Usage': {
             k: {
                 f: np.array([float(fleet.fuel_usage.get((k, f, t), 0.0)) for t in T])
-                   * FUEL_TO_MJ.get(f, 1.0) / 1e6   # → TJ useful energy
+                   * FUEL_TO_MJ.get(f, 1.0) / 1e6   # -> TJ useful energy
                 for f in all_fuels
             } for k in fleet.K
         },
@@ -100,7 +100,7 @@ if __name__ == "__main__":
 
     p.plot_by_inner(outputs['Emissions'],
                     title='Fleet LCA emissions',
-                    x_label='Year', y_label='MtCO₂e / year',
+                    x_label='Year', y_label='MtCO2e / year',
                     add_total=True, color_map=EMIS_COLOR)
 
     p.plot_by_inner(outputs['Cost'],

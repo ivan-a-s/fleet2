@@ -2,10 +2,10 @@
 Policy classes for the fleet2 HDT adoption model.
 
 Two-phase interface:
-  pre_apply(params, k, p, t)  — modifies the params dict before Vehicles() is constructed.
+  pre_apply(params, k, p, t)  -- modifies the params dict before Vehicles() is constructed.
                                   Use for physics policies (GVWL exemption, survival rate
-                                  modifications) that propagate through mass → FC → cost.
-  apply(v)                    — writes cost terms into v.annual_cost after construction,
+                                  modifications) that propagate through mass -> FC -> cost.
+  apply(v)                    -- writes cost terms into v.annual_cost after construction,
                                   then calls v._calculate_tco_npv() to update tco and npv.
                                   Use for cost policies (carbon tax, LCFS, ZEV rebates).
 
@@ -67,11 +67,11 @@ class LCFS:
     those using low-CI fuels (electricity, H2) earn credits (negative cost).
 
     Annual cost per vehicle:
-        annual_distance × (actual_CI_per_km − baseline_CI_per_km × (1 − target[year]))
-        × credit_price / 1000
+        annual_distance x (actual_CI_per_km - baseline_CI_per_km x (1 - target[year]))
+        x credit_price / 1000
 
     baseline_CI_per_km is calibrated from the 2025 diesel vehicle after Fleet builds
-    its initial stock — call set_baseline_fc(k, v) for each vehicle type before _run().
+    its initial stock -- call set_baseline_fc(k, v) for each vehicle type before _run().
 
     credit_price: $/tCO2e  (default 300)
     start_target: CI reduction fraction required in START_YEAR (default 0.183 = 18.3%)
@@ -88,7 +88,7 @@ class LCFS:
         mask  = years >= START_YEAR
         arr[mask] = np.linspace(start_target, end_target, int(mask.sum()))
         self._target_arr  = arr.astype(np.float32)
-        self._baseline_fc = {}   # {k: L/km} — set by Fleet after _build_initial_stock()
+        self._baseline_fc = {}   # {k: L/km} -- set by Fleet after _build_initial_stock()
 
     def set_baseline_fc(self, k, v):
         """Calibrate baseline diesel FC for vehicle type k from its age-0 fuel consumption."""
