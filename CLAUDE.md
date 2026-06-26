@@ -18,8 +18,10 @@ powertrains that contain that component, rather than sampled independently.
 |------|---------|
 | `data.json` | All parameters. No Python expressions — arrays use `{"array": ...}` specs |
 | `data.py` | Thin loader: reads JSON, expands array specs to numpy, exports module-level constants |
-| `model.py` | `Vehicles` and `Fleet` classes; main entry point |
+| `model.py` | `Vehicles` and `Fleet` classes; main entry point for single deterministic runs |
 | `policies.py` | All policy classes: `CarbonTax`, `GVWLExemption`, `LCFS`, `ZEVMandate`, `Policies` container |
+| `scenarios.py` | Policy scenario definitions — one `Policies` object per named scenario; edit values here |
+| `run.py` | Monte Carlo runner: parallel execution, KS convergence, per-scenario `.npz` output |
 | `vehicle_modelling/fuel_consumption.py` | FASTSim surrogate training code — **not imported by model.py** |
 | `vehicle_modelling/surrogates.json` | Surrogate coefficients per (powertrain, drive_cycle) used for inference |
 | `plots/vehicle_plots.py` | Per-cohort sanity-check plots (mass, FC, TCO, emissions, etc.) |
@@ -32,8 +34,34 @@ powertrains that contain that component, rather than sampled independently.
 
 ## Running
 
+Single deterministic run (median parameters, no policies):
 ```
 C:\Users\ivana\anaconda3\python.exe model.py
+```
+
+Monte Carlo runner (all scenarios, default settings):
+```
+C:\Users\ivana\anaconda3\python.exe run.py
+```
+
+Common MC options:
+```
+# Quick smoke test — 10 runs, baseline only
+C:\Users\ivana\anaconda3\python.exe run.py --max-runs 10 --scenarios baseline
+
+# Specific scenarios with tighter convergence
+C:\Users\ivana\anaconda3\python.exe run.py --scenarios baseline carbon_tax lcfs --tol 0.04
+
+# Adjust worker count
+C:\Users\ivana\anaconda3\python.exe run.py --workers 4
+```
+
+Output lands in `results/<scenario>.npz` (shape `(n_runs, 26)` float32 arrays) and
+`results/<scenario>_meta.json` (n_runs, seed, tol, wall_time_s).  Load with:
+```python
+import numpy as np
+d = np.load('results/baseline.npz')
+zev_sleeper = d['zev_stock_sleeper']   # shape (n_runs, 26)
 ```
 
 ## Regression snapshot
@@ -68,7 +96,8 @@ This compares 2054 fleet output values and reports any that shifted by more than
 - [x] `Fleet._aggregate()` — complete: total_stock, sales, fuel_usage, emissions, system_costs
 - [x] `plots/vehicle_plots.py` — per-cohort sanity checks; `plots/fleet_plots.py` — fleet-level line plots
 - [x] `policies.py` — `CarbonTax`, `GVWLExemption`, `LCFS`, `ZEVMandate`, `Policies` container; comparison plots in `plots/policy_plots/`
-- [ ] Monte Carlo runner (`run.py`) — not yet written
+- [x] `scenarios.py` — 6 named policy scenarios (`baseline`, `carbon_tax`, `lcfs`, `zev_mandate`, `gvwl`, `full_policy`)
+- [x] `run.py` — Monte Carlo runner: grouped sampling, parallel execution, KS convergence, `.npz` output
 
 ## Current model.py structure
 
@@ -131,13 +160,62 @@ COST_CATEGORIES = {
 ## Next steps
 
 1. Check total mass plausibility — sleeper diesel showing 28.9 t loaded (expect ~36-40 t)
-2. Write `run.py` Monte Carlo runner (multiprocessing, per-scenario output aggregation)
-3. Verify `model.py` checked up to `_calculate_fuel_consumption` — remaining methods still need review
-4. Stage 4 policy improvements: dynamic LCFS credit pricing, ZEV purchase rebate, joint mandate+LCFS convergence (see `POLICY_PLAN.md`)
+2. Verify `model.py` checked up to `_calculate_fuel_consumption` — remaining methods still need review
+3. Stage 4 policy improvements: dynamic LCFS credit pricing, ZEV purchase rebate, joint mandate+LCFS convergence (see `POLICY_PLAN.md`)
 
 ## Performance notes
 
-Single `Fleet()` run takes ~0.53 s at median params. The dominant cost is constructing 543 `Vehicles`
-objects in `_run()` — inherent physics, not easily vectorised. Further optimisation opportunities
-(ZEV mandate loop, Monte Carlo parallelism, `activity_met` vectorisation) are documented in the
-`verification/profile_fleet.py` docstring under "Remaining optimisation opportunities".
+Single `Fleet()` run takes ~0.5–0.9 s depending on machine and policies active. The dominant cost
+is constructing 543 `Vehicles` objects in `_run()` — inherent physics, not easily vectorised.
+Further optimisation opportunities (ZEV mandate loop, `activity_met` vectorisation) are documented
+in the `verification/profile_fleet.py` docstring under "Remaining optimisation opportunities".
+
+Monte Carlo throughput with `run.py` at 8 workers: ~4–5× wall-clock speedup over serial.
+Baseline scenario (no policies, high distributional uncertainty) converges at ~3 000–4 000 runs
+with `--tol 0.05` (~8 min). Policy scenarios converge faster (~1 000–2 000 runs) because the
+mandate/tax constrains the ZEV adoption distribution.
+
+## Monte Carlo architecture (`run.py` + `scenarios.py`)
+
+**Sampling:** `get_uncertainty_distributions(PARAMS)` walks the params tree and returns every
+leaf with a `'dist'` key. Parameters sharing a `'group'` field receive the same cumulative
+probability draw (correlated); others are independent. `_build_col_map()` maps each parameter
+path to a column index in the `(max_runs, n_independent)` sample matrix, which is pre-generated
+once with `np.random.default_rng(seed)` so all scenarios use identical draws for counterfactual
+comparison.
+
+**Parallel execution:** All `max_runs` futures are submitted to a single `ProcessPoolExecutor`
+at once (no per-batch pool overhead). `as_completed()` yields results as workers finish. Below
+`PARALLEL_THRESHOLD = 50` runs a flat serial loop is used instead (pool setup cost exceeds
+any speedup for small runs).
+
+**Convergence:** After every `--check-every` completions (minimum 200), a half-sample
+two-sample KS test is applied. The accumulated results are split into two equal halves and
+`scipy.stats.ks_2samp` is called for each monitored series at each calendar year:
+
+    D = max_x |F_A(x) - F_B(x)|
+
+D ∈ [0, 1] is scale-free — no normalisation denominator needed. For i.i.d. draws,
+E[D] ≈ 0.8/√n per half, so the convergence rate is predictable. Converged when
+`max(D) < tol` across all monitored series and years. Remaining queued futures are
+cancelled (already in-flight workers finish naturally).
+
+**Monitored series** (15 total = 5 metrics × 3 vehicle types):
+- `zev_stock_{k}` — total ZEV stock
+- `emissions_{k}_use` / `emissions_{k}_supply` — fleet emissions
+- `system_costs_{k}_capital` / `system_costs_{k}_fuel` — cost spread
+
+**Output arrays** (82 series per scenario):
+
+| Key pattern | Shape | Content |
+|-------------|-------|---------|
+| `total_stock_{k}_{p}` | (n, 26) | Total on-road stock by powertrain |
+| `sales_{k}_{p}` | (n, 26) | New sales per year |
+| `zev_stock_{k}` | (n, 26) | Aggregate ZEV stock |
+| `emissions_{k}_{embodied\|supply\|use}` | (n, 26) | Fleet emissions (kgCO2e/yr) |
+| `system_costs_{k}_{category}` | (n, 26) | Annual costs ($/yr) |
+| `fuel_usage_{k}_{f}` | (n, 26) | Fuel consumed (L, kg, or kWh/yr) |
+
+**Scenarios** (`scenarios.py`): `baseline`, `carbon_tax`, `lcfs`, `zev_mandate`, `gvwl`,
+`full_policy`. Policy numeric values (tax schedules, LCFS targets, ZEV mandate fractions) all
+live in `scenarios.py` — edit there without touching `run.py` or `model.py`.

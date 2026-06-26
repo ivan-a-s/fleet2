@@ -1,0 +1,7 @@
+{
+  "scenario": "zev_mandate",
+  "n_runs": 200,
+  "seed": 0,
+  "tol": 0.05,
+  "wall_time_s": 41.76
+}
