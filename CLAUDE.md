@@ -16,8 +16,8 @@ powertrains that contain that component, rather than sampled independently.
 
 | File | Purpose |
 |------|---------|
-| `data.json` | All parameters. No Python expressions — arrays use `{"array": ...}` specs |
-| `data.py` | Thin loader: reads JSON, expands array specs to numpy, exports module-level constants |
+| `params.py` | All parameters. Each leaf wrapped in `Param(value, src, units, notes)` for citation tracking |
+| `data.py` | Thin loader: strips `Param` wrappers, expands array specs to numpy, exports module-level constants |
 | `model.py` | `Vehicles` and `Fleet` classes; main entry point for single deterministic runs |
 | `policies.py` | All policy classes: `CarbonTax`, `GVWLExemption`, `LCFS`, `ZEVMandate`, `Policies` container |
 | `scenarios.py` | Policy scenario definitions — one `Policies` object per named scenario; edit values here |
@@ -31,6 +31,8 @@ powertrains that contain that component, rather than sampled independently.
 | `plots/policy_plots/lcfs.py` | LCFS comparison plots (NPV, sales) |
 | `plots/policy_plots/zev_mandate.py` | ZEV mandate comparison plots (NPV, sales) |
 | `verification/profile_fleet.py` | cProfile script for `Fleet()`; phase table + top-25 by self/cumtime; saves `profile.prof` |
+| `documentation/build_appendix.py` | Generates `documentation/appendix.md` from `params.py`; run after any parameter change |
+| `documentation/appendix.md` | Auto-generated supplementary material tables (A1–A13) with citations; do not edit by hand |
 
 ## Running
 
@@ -74,21 +76,21 @@ After changes, run:
 ```
 C:\Users\ivana\anaconda3\python.exe verification/snapshot.py check
 ```
-This compares 2054 fleet output values and reports any that shifted by more than 0.01%. If outputs change unexpectedly, investigate before proceeding. `verification/snapshot.npz` is the saved baseline — overwrite it intentionally when a change is deliberate.
+This compares 2210 fleet output values and reports any that shifted by more than 0.01%. If outputs change unexpectedly, investigate before proceeding. `verification/snapshot.npz` is the saved baseline — overwrite it intentionally when a change is deliberate.
 
 ## Conventions
 
 - **Never silently change parameter values.** All values come from calibrated sources. If something looks wrong, flag it and ask.
 - Dict/array attributes throughout — no dataclasses for computed outputs.
 - `set_param()` / `set_year()` / `realise_uncertainties()` in `model.py` handle all uncertainty sampling.
-- Array specs in `data.json` use `{"array": "logistic"|"linspace"|"step"|"constant", ...}` — expanded by `data.py` loader.
+- Array specs in `params.py` use `{"array": "logistic"|"linspace"|"step"|"constant", ...}` as the `Param.value` — expanded to numpy by `data.py`'s `_expand_arrays` after stripping wrappers.
 - `load_model_params()` and `estimate_fuel_consumption()` are copied directly into `model.py` (not imported from `fuel_consumption.py`) to avoid the fastsim dependency at runtime.
 - **`set_year()` is non-mutating** — it returns new dicts/scalars and never modifies its input. This means `select_vehicle_params()` only needs shallow `dict()` copies, not `deepcopy`. Do not change `set_year()` to mutate in-place.
 - **`_discount_factor`** is precomputed once in `Vehicles.__init__` as `survival_rate / (1+r)^age`. Use `v._discount_factor[0]` for NPV adjustments at age 0 (e.g. ZEV mandate penalty) rather than recomputing the full discount sum.
 
 ## Build status
 
-- [x] `data.json` + `data.py` loader — complete, all 3 vehicle types × 7 powertrains
+- [x] `params.py` + `data.py` loader — complete, all 3 vehicle types × 7 powertrains; citations in `Param.src` fields
 - [x] `Vehicles` class — complete: mass, fuel consumption (FASTSim surrogate), range, annual_distance, FC replacements, emissions, capital_cost, annual_cost, TCO, NPV
 - [x] `Fleet._build_initial_stock()` — complete: pre-2025 diesel cohorts sized to match activity requirement
 - [x] `Fleet._run()` — complete: year-by-year roll-over, vehicle creation, market share, new purchases
@@ -148,7 +150,7 @@ COST_CATEGORIES = {
 - `scope='fleet'` — ZEV share target applies across all k combined; `targets = {year_str: fraction}`
 - `scope='per_k'` — independent target per vehicle type; `targets = {k: {year_str: fraction}}`
 
-## Key data.json fields to know
+## Key params.py fields to know
 
 - `settings`: max_age=25, start_year=2025, end_year=2050, discount_rate=0.08, growth_rate=0.02
 - `fleet`: initial_activity, activity_growth=0.02, price_lambda=0.00003, autonomous_t50=2040
@@ -156,6 +158,15 @@ COST_CATEGORIES = {
 - Per-powertrain: `init_market_limit` (1.0 for dice, 0.02 for others), `cagr_nacent`, `cagr_mature`
 - Surrogate mapping: both `hice` and `dhice` reuse the `he` surrogate (all 5 drive cycles); `phe` only has `udds_hdt`/`cruise_hdt` (no haul-specific files)
 - `hice` is modelled as a hybridised H2 ICE: motor (220 kW), battery (10/5/5 kWh), regen_efficiency=0.71, accessory_load=3400 — mirrors `he` component set with H2 tank instead of diesel tank
+
+## params.py conventions
+
+- Every numeric leaf is wrapped: `P(value, src="Author, Year", units="unit", notes="optional")`
+- `src=None` or a string starting with `"UNREF --"` flags values without a paper citation
+- Container dicts (those without a `"dist"` or `"array"` key) are left as plain Python dicts
+- `data.py` calls `_strip_params()` to remove all `Param` wrappers before passing to `_expand_arrays()`
+- `documentation/build_appendix.py` reads `PARAM_DICT` directly to generate supplementary tables
+- To update a parameter: edit the value and/or `src` in `params.py`, then run `python documentation/build_appendix.py`
 
 ## Next steps
 

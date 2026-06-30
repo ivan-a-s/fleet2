@@ -17,18 +17,17 @@ The simulation proceeds in three layers:
 
 To do:
  Needs changing now:
- - Make sure I am happy with the accessory load and how efficiency is applied.
- - Adjust the activity requrements given the payload changes.
 
  Needs changing later:
  - Adjust the embodied emission factors for the powertrain components using GREET.
  - Make the git accessible but not all of it to everyone (clean without changing old code).
  - Policy net revenue plots.
- - Fast and slow charge could be merged and have a different way of
-   doing the pricing. Sleeper PHEs could use non-depot slow charge.
  - Uncertainty analysis.
+ - Set the revenue dynamically.
 
  Nice to have (in order of priority):
+ - Fast and slow charge could be merged and have a different way of
+   doing the pricing. Sleeper PHEs could use non-depot slow charge.
  - Add a resource-haul vehicle type.
  - Size vehicle components for NPV optimisation?
  - Scale factors to relate cost to scale somehow.
@@ -36,6 +35,9 @@ To do:
  - Variance in use (logit change like NREL).
  - Make scrappage/usage decisions for vehicles?
  - Hotel load for sleepers and fridge units?
+ - Improve the battery accessory load estimation.
+ - Activity price elasticity.
+ - Add autonomous vehicles again.
 
  Checked up to:
   - _calculate_fuel_consumption

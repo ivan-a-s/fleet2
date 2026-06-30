@@ -1,8 +1,18 @@
-import json
 import os
 import numpy as np
+from params import PARAM_DICT, Param
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _strip_params(obj):
+    if isinstance(obj, Param):
+        return _strip_params(obj.value)
+    elif isinstance(obj, dict):
+        return {k: _strip_params(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_strip_params(v) for v in obj]
+    return obj
 
 
 def _expand_arrays(d, n):
@@ -26,8 +36,7 @@ def _expand_arrays(d, n):
     return d
 
 
-with open(os.path.join(_HERE, 'data.json')) as _f:
-    _raw = json.load(_f)
+_raw = _strip_params(PARAM_DICT)
 
 _MAX_AGE = _raw['settings']['max_age']
 PARAMS = _expand_arrays(_raw, _MAX_AGE)

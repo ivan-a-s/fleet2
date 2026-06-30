@@ -22,13 +22,22 @@ python model.py
 
 ## Files
 
-### `data.json`
-All model parameters. No Python expressions — arrays use
-`{"array": "logistic"|"linspace"|"step"|"constant", ...}` specs.
+### `params.py`
+All model parameters. Every numeric leaf is wrapped in
+`Param(value, src, units, notes)` for citation tracking. Array specs
+(`{"array": "logistic"|...}`) and distribution specs (`{"dist": "uniform"|...}`)
+are stored as the `Param.value` and expanded/sampled downstream.
 
 ### `data.py`
-Thin loader: reads `data.json`, expands array specs to numpy arrays,
-exports module-level constants (`PARAMS`, `START_YEAR`, `MAX_AGE`, etc.).
+Thin loader: strips `Param` wrappers via `_strip_params()`, expands array specs
+to numpy arrays, exports module-level constants (`PARAMS`, `START_YEAR`, `MAX_AGE`, etc.).
+
+### `documentation/build_appendix.py`
+Reads `params.py` and generates `documentation/appendix.md` — supplementary
+material tables (A1–A13) with values and citations. Run after any parameter change:
+```
+python documentation/build_appendix.py
+```
 
 ### `model.py`
 `Vehicles` and `Fleet` classes. Main entry point.
