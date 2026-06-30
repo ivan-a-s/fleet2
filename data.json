@@ -194,6 +194,11 @@
                         "mass": 537,
                         "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
                         "efficiency": 0.875
+                    },
+                    "phe": {
+                        "mass": 175,
+                        "embodied_emissions": {"dist": "interp", "group": "embodied", "2025": {"dist": "const", "val": 2.2}, "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
+                        "efficiency": 0.875
                     }
                 },
                 "electronic_controller": {
@@ -435,6 +440,26 @@
                         "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
                         "cagr_mature": {"dist": "uniform", "min": 0.34, "max": 0.38}
                     },
+                    "phe": {
+                        "components": {
+                            "ice":                     {"type": "converter"},
+                            "motor":                   {"type": "converter", "capacity": 350},
+                            "diesel_tank":             {"type": "ess",       "capacity": 500},
+                            "battery":                 {"type": "ess",       "capacity": 300},
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
+                        },
+                        "fuels": {
+                            "fast_charge": {"proportion": 0.5},
+                            "diesel":      {"proportion": 0.5}
+                        },
+                        "regen_efficiency": 0.71,
+                        "accessory_load": 3400,
+                        "running_cost": 0.17,
+                        "init_market_limit": 0.02,
+                        "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
+                        "cagr_mature": {"dist": "uniform", "min": 0.34, "max": 0.38}
+                    },
                     "be": {
                         "components": {
                             "motor":                  {"type": "converter",    "capacity": 880},
@@ -584,6 +609,26 @@
                         "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
                         "cagr_mature": {"dist": "uniform", "min": 0.34, "max": 0.38}
                     },
+                    "phe": {
+                        "components": {
+                            "ice":                     {"type": "converter"},
+                            "motor":                   {"type": "converter", "capacity": 350},
+                            "diesel_tank":             {"type": "ess",       "capacity": 500},
+                            "battery":                 {"type": "ess",       "capacity": 200},
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
+                        },
+                        "fuels": {
+                            "slow_charge": {"proportion": 0.5},
+                            "diesel":      {"proportion": 0.5}
+                        },
+                        "regen_efficiency": 0.71,
+                        "accessory_load": 3400,
+                        "running_cost": 0.17,
+                        "init_market_limit": 0.02,
+                        "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
+                        "cagr_mature": {"dist": "uniform", "min": 0.34, "max": 0.38}
+                    },
                     "be": {
                         "components": {
                             "motor":                 {"type": "converter",    "capacity": 880},
@@ -718,6 +763,26 @@
                         },
                         "fuels": {
                             "diesel": {"proportion": 1.0}
+                        },
+                        "regen_efficiency": 0.71,
+                        "accessory_load": 3400,
+                        "running_cost": 0.17,
+                        "init_market_limit": 0.02,
+                        "cagr_nacent": {"dist": "uniform", "min": 0.44, "max": 0.54},
+                        "cagr_mature": {"dist": "uniform", "min": 0.34, "max": 0.38}
+                    },
+                    "phe": {
+                        "components": {
+                            "ice":                     {"type": "converter"},
+                            "motor":                   {"type": "converter", "capacity": 350},
+                            "diesel_tank":             {"type": "ess",       "capacity": 500},
+                            "battery":                 {"type": "ess",       "capacity": 150},
+                            "combustion_transmission": {"type": "transmission"},
+                            "after_treatment":         {"type": "accessories"}
+                        },
+                        "fuels": {
+                            "slow_charge": {"proportion": 0.5},
+                            "diesel":      {"proportion": 0.5}
                         },
                         "regen_efficiency": 0.71,
                         "accessory_load": 3400,

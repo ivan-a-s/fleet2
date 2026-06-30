@@ -245,12 +245,10 @@ def npv(fleet, k='sleeper'):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    np.random.seed(0)
-    inputs_distributions = dict(get_uncertainty_distributions(PARAMS))
-    param_cps = dict(zip(inputs_distributions.keys(), np.random.rand(len(inputs_distributions)).astype('float32')))
-    fleet = Fleet(PARAMS, param_cps, exclude_powertrains=('phe',))
+    param_cps = {path: np.float32(0.5) for path, _ in get_uncertainty_distributions(PARAMS)}
+    fleet = Fleet(PARAMS, param_cps)
 
-    for k in ['sleeper']:
+    for k in ['straight']:
         age_profiles(fleet, k=k, y=START_YEAR)
         vehicle_mass(fleet, k=k)
         capital_cost(fleet, k=k)

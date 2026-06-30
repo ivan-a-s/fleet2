@@ -16,21 +16,30 @@ The simulation proceeds in three layers:
   3. Aggregate -- totals over the stock for fuel use, emissions, and system costs.
 
 To do:
- - Size vehicle components for NPV optimisation?
- - Altitude on FC/engine performance and air resistance.
- - Make scrappage/usage decisions for vehicles?
+ Needs changing now:
  - Make sure I am happy with the accessory load and how efficiency is applied.
- - Add a resource-haul vehicle type.
- - Adjust the embodied emission factors for the powertrain components using GREET.
- - Add PHEs and give them a quarter of a charger each.
  - Adjust the activity requrements given the payload changes.
- - Make the git accessible but not all of it to everyone.
- - I can't see an embodied spike for FCETs in vehicle_plots.py
- - Scale factors to relate cost to scale somehow.
+
+ Needs changing later:
+ - Adjust the embodied emission factors for the powertrain components using GREET.
+ - Make the git accessible but not all of it to everyone (clean without changing old code).
  - Policy net revenue plots.
- - Make sure __main__.py run is with cp=0.5 for all variables.
+ - Fast and slow charge could be merged and have a different way of
+   doing the pricing. Sleeper PHEs could use non-depot slow charge.
+ - Uncertainty analysis.
+
+ Nice to have (in order of priority):
+ - Add a resource-haul vehicle type.
+ - Size vehicle components for NPV optimisation?
+ - Scale factors to relate cost to scale somehow.
+ - Altitude on FC/engine performance and air resistance.
+ - Variance in use (logit change like NREL).
+ - Make scrappage/usage decisions for vehicles?
+ - Hotel load for sleepers and fridge units?
+
  Checked up to:
   - _calculate_fuel_consumption
+
 """
 import warnings
 import numpy as np
@@ -81,6 +90,7 @@ EFF_COMPONENT = {
     'dice': 'ice', 'he': 'ice',
     'be':   'motor', 'fc': 'fc',
     'hice': 'ice', 'dhice': 'ice',
+    'phe':  'motor',
 }
 ZEV_POWERTRAINS     = {'be', 'fc', 'hice'}
 HICE_POWERTRAINS    = {'hice', 'dhice'}
@@ -250,6 +260,29 @@ class Vehicles:
     # -- Fuel consumption ------------------------------------------------------
 
     def _calculate_fuel_consumption(self):
+        if self.p == 'phe':
+            battery_fuel = next((f for f in self.fuels if 'charge' in f), None)
+            charge_eff   = float(self.fuels[battery_fuel].get('refuel_efficiency', 1.0)) if battery_fuel else 1.0
+            motor_eff    = float(self.params['components']['motor']['efficiency'])
+            ice_eff      = float(self.params['components']['ice']['efficiency'])
+            self.average_speed    = self.params['average_speed']
+            self.fuel_consumption = {f: np.zeros(len(self.age)) for f in self.fuels}
+            for dc in np.unique(self.params['drive_cycle']):
+                a_rep = next(a for a in self.age if self.params['drive_cycle'][a] == dc)
+                feat  = {
+                    'mass':           float(self.total_mass[a_rep]),
+                    'drag_coef':      self.params['drag_coef'],
+                    'accessory_load': self.params['accessory_load'],
+                }
+                be_raw = estimate_fuel_consumption({**feat, 'peak_eff': motor_eff}, _SURROGATES['be'][dc])
+                he_raw = estimate_fuel_consumption({**feat, 'peak_eff': ice_eff},   _SURROGATES['he'][dc])
+                mask   = np.array([self.params['drive_cycle'][a] == dc for a in self.age])
+                self.fuel_consumption[battery_fuel][mask] = be_raw / charge_eff
+                self.fuel_consumption['diesel'][mask]     = he_raw
+            self._phe_cd_fc = self.fuel_consumption[battery_fuel].copy()
+            self._phe_cs_fc = self.fuel_consumption['diesel'].copy()
+            return
+
         surrogate = SURROGATE_NAME.get(self.p, self.p)
         peak_eff  = float(self.params['components'][EFF_COMPONENT[self.p]]['efficiency'])
 
@@ -431,6 +464,29 @@ class Vehicles:
         self.annual_distance   = np.zeros(len(self.age))
         self._enroute_distance = np.zeros(len(self.age))
         cycles = 0.0
+
+        if self.p == 'phe':
+            electric_range   = self.range.copy()
+            self.annual_fuel = {battery_fuel: np.zeros(len(self.age)),
+                                'diesel':     np.zeros(len(self.age))}
+            self._enroute_distance = np.zeros(len(self.age))
+            cycles = 0.0
+            for a in self.age:
+                if battery_cap > 0 and self._phe_cd_fc[a] > 0:
+                    elec_r = electric_range[a] * max(0.0, 1.0 - deg_per_year * a - deg_per_cycle * cycles)
+                else:
+                    elec_r = 0.0
+                cd_daily = min(daily_target[a], elec_r)
+                cs_daily = max(0.0, daily_target[a] - cd_daily)
+                self.annual_distance[a]        = daily_target[a] * 5.0 / 7.0 * 365.0
+                annual_cd                      = cd_daily * 5.0 / 7.0 * 365.0
+                annual_cs                      = cs_daily * 5.0 / 7.0 * 365.0
+                self.annual_fuel[battery_fuel][a] = annual_cd * self._phe_cd_fc[a]
+                self.annual_fuel['diesel'][a]     = annual_cs * self._phe_cs_fc[a]
+                if battery_cap > 0 and self._phe_cd_fc[a] > 0:
+                    cycles += annual_cd * self._phe_cd_fc[a] * battery_refuel_eff / battery_cap
+            self.range = electric_range
+            return
 
         for a in self.age:
             # Battery range degradation (1% per year of age + 0.01% per charge cycle)
@@ -617,6 +673,10 @@ class Vehicles:
                 c['after_treatment'] = self._cap_cost('after_treatment')
         if self.p in CHARGER_POWERTRAINS and self.k != 'sleeper':
             c['charger'] = self._cap_cost('charger_50kw')
+        if self.p == 'phe':
+            _phe_bfuel = next((f for f in self.fuels if 'charge' in f), None)
+            if _phe_bfuel and _phe_bfuel != 'fast_charge':
+                c['charger'] = 0.25 * self._cap_cost('charger_50kw')
         self.capital       = c
         self.capital_total = sum(c.values())
 
@@ -1124,16 +1184,7 @@ class Fleet:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    np.random.seed(0)
-    group_cps  = {}
-    param_cps  = {}
-    for path, group in get_uncertainty_distributions(PARAMS):
-        if group is not None:
-            if group not in group_cps:
-                group_cps[group] = np.float32(np.random.rand())
-            param_cps[path] = group_cps[group]
-        else:
-            param_cps[path] = np.float32(np.random.rand())
+    param_cps = {path: np.float32(0.5) for path, _ in get_uncertainty_distributions(PARAMS)}
     fleet = Fleet(PARAMS, param_cps)
 
     v = fleet.vehicles['sleeper', 'dice', START_YEAR]

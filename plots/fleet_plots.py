@@ -89,10 +89,7 @@ def merge_outputs(items):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    np.random.seed(0)
-    inputs_distributions = dict(get_uncertainty_distributions(PARAMS))
-    param_cps = dict(zip(inputs_distributions.keys(),
-                         np.random.rand(len(inputs_distributions)).astype('float32')))
+    param_cps = {path: np.float32(0.5) for path, _ in get_uncertainty_distributions(PARAMS)}
     fleet   = Fleet(PARAMS, param_cps)
     outputs = extract_outputs(fleet)
 
