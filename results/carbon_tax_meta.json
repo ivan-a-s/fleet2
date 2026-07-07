@@ -1,7 +1,0 @@
-{
-  "scenario": "carbon_tax",
-  "n_runs": 200,
-  "seed": 0,
-  "tol": 0.05,
-  "wall_time_s": 23.95
-}

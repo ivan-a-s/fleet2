@@ -6,3 +6,7 @@ old/*
 !old/model_old.py
 !old/parallel_test_old.py
 !old/data_old.py
+
+results/
+CLAUDE.md
+POLICY_PLAN.md
