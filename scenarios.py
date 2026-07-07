@@ -17,6 +17,11 @@ Edit the values here to change scenario assumptions; model.py and run.py need no
 
 from policies import CarbonTax, GVWLExemption, LCFS, ZEVMandate, Policies
 
+# EER (Energy Effectiveness Ratio) sets for LCFS.  Diesel always = 1.0.
+# Powertrains not listed (dice, he, dhice) default to 1.0 for all fuels.
+_EER_MODEL = {'be': 2.25, 'fc': 1.71, 'hice': 1.14, 'phe': 2.25}  # model-derived (fleet model, CP=0.5, 2025)
+_EER_BC    = {'be': 3.2, 'fc': 1.8, 'hice': 0.9, 'phe': 3.2}   # BC LCFS technical regulation
+
 SCENARIOS = {
     'baseline': Policies(),
 
@@ -25,7 +30,11 @@ SCENARIOS = {
     ),
 
     'lcfs': Policies(
-        lcfs=LCFS(credit_price=300, start_target=0.183, end_target=0.76),
+        lcfs=LCFS(credit_price=300, start_target=0.183, end_target=0.76, eer=_EER_MODEL),
+    ),
+
+    'lcfs_bc_eer': Policies(
+        lcfs=LCFS(credit_price=300, start_target=0.183, end_target=0.76, eer=_EER_BC),
     ),
 
     'zev_mandate': Policies(
@@ -36,13 +45,30 @@ SCENARIOS = {
         ),
     ),
 
+    'zev_mandate_100k': Policies(
+        zev_mandate=ZEVMandate(
+            targets={'2025': 0, '2030': 0.3, '2040': 1.0, '2050': 1.0},
+            penalty=100_000,
+            scope='fleet',
+        ),
+    ),
+
+    'zev_mandate_100k_rn': Policies(
+        zev_mandate=ZEVMandate(
+            targets={'2025': 0, '2030': 0.3, '2040': 1.0, '2050': 1.0},
+            penalty=100_000,
+            scope='fleet',
+            revenue_neutral=True,
+        ),
+    ),
+
     'gvwl': Policies(
         gvwl_exemption=GVWLExemption(),
     ),
 
     'full_policy': Policies(
         carbon_tax=CarbonTax({'2025': 95, '2030': 170, '2050': 170}),
-        lcfs=LCFS(credit_price=300, start_target=0.183, end_target=0.76),
+        lcfs=LCFS(credit_price=300, start_target=0.183, end_target=0.76, eer=_EER_MODEL),
         zev_mandate=ZEVMandate(
             targets={'2025': 0, '2030': 0.3, '2040': 1.0, '2050': 1.0},
             penalty=30_000,

@@ -96,6 +96,8 @@ KEY_LABELS = {
     'diesel_tank':             'Diesel Tank',
     'h2_700bar':               'H2 Tank (700 bar)',
     'h2_350bar':               'H2 Tank (350 bar)',
+    'tire':                    'Tire',
+    'trailer_tire':            'Trailer Tire',
     'electronic_controller':   'Electronic Controller',
     'combustion_transmission': 'Combustion Transmission',
     'electric_transmission':   'Electric Transmission',

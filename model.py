@@ -19,11 +19,11 @@ To do:
  Needs changing now:
 
  Needs changing later:
- - Adjust the embodied emission factors for the powertrain components using GREET.
  - Make the git accessible but not all of it to everyone (clean without changing old code).
  - Policy net revenue plots.
- - Uncertainty analysis.
+ - Uncertainty analysis (reduce params?).
  - Set the revenue dynamically.
+ - HDRD should be in the diesel pool (may become more available as passenger EV market grows).
 
  Nice to have (in order of priority):
  - Fast and slow charge could be merged and have a different way of
@@ -38,11 +38,13 @@ To do:
  - Improve the battery accessory load estimation.
  - Activity price elasticity.
  - Add autonomous vehicles again.
+ - Simplify params (one motor and then just change the mass with the powertrain etc.)
 
  Checked up to:
   - _calculate_fuel_consumption
 
 """
+import os
 import warnings
 import numpy as np
 import copy
@@ -57,7 +59,10 @@ def load_model_params(json_path):
     with open(json_path, 'r') as f:
         return json.load(f)
 
-_SURROGATES = load_model_params('vehicle_modelling/surrogates.json')
+_SURROGATES = load_model_params(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 'vehicle_modelling', 'surrogates.json')
+)
 
 def estimate_fuel_consumption(input_data, model_params):
     """
@@ -231,9 +236,9 @@ class Vehicles:
 
     def _calculate_mass(self):
         gvwl_increase = float(self.params.get('gvwl_exemption_kg', 0.0))
-        self.mass = {'frame': float(self.params['frame_mass'])}
-        if float(self.params['trailer_mass']) > 0:
-            self.mass['trailer'] = float(self.params['trailer_mass'])
+        self.mass = {'frame': float(self.params['components']['frame']['mass'])}
+        if 'trailer' in self.params['components']:
+            self.mass['trailer'] = float(self.params['components']['trailer']['mass'])
         for comp_name, comp in self.params['components'].items():
             if comp['type'] == 'converter':
                 self.mass[comp_name] = float(comp['mass'])
@@ -571,7 +576,21 @@ class Vehicles:
         Three emission streams:
           embodied      -- manufacturing emissions (kgCO2e): initial manufacture at age 0;
                           FC stack replacements at their actual replacement ages, if any.
-                          Frame/trailer use the shared embodied_emissions (kgCO2e/kg).
+                          Frame uses the 'frame' component's embodied_emissions (kgCO2e/kg);
+                          trailer (sleeper/day_cab only) uses its own 'trailer' component,
+                          multiplied by trailers_per_truck for lifetime replacements. Both are
+                          shared across vehicle types like every other component; only the
+                          mass (frame_mass/trailer_mass) is vehicle-type-specific.
+                          tire/trailer_tire use the 'tire' component's embodied_emissions,
+                          lump-summed at age 0 like frame/trailer (no age-distribution): their
+                          'mass' is each vehicle type's *lifetime* tire-replacement mass, not an
+                          instantaneous physical mass, so unlike frame/trailer they are NOT added
+                          to Vehicles.mass/unloaded_mass in _calculate_mass. Unlike the trailer's
+                          own structural mass, trailer_tire is NOT multiplied by trailers_per_truck:
+                          tire wear is driven by cumulative distance travelled, not by how many
+                          physical trailer units carried that distance, so GREET's replacement
+                          schedule (calibrated over one reference truck lifetime) already covers
+                          the full truck life regardless of how many trailers cycle through it.
                           Converter/transmission components use their own embodied_emissions
                           field (same distribution, falls back to shared factor if absent).
                           ESS components use a dedicated kgCO2e/unit-capacity field.
@@ -587,11 +606,21 @@ class Vehicles:
         the emissions intensities (kgCO2e per source unit) apply directly.
         """
         p = self.params
-        emb = float(p['embodied_emissions'])
-        embodied_total = (
-            float(p['frame_mass'])
-            + float(p.get('trailer_mass', 0)) * float(p.get('trailers_per_truck', 0))
-        ) * emb
+        emb = float(p['components']['frame']['embodied_emissions'])
+        embodied_total = float(p['components']['frame']['mass']) * emb
+        trailer_comp = p['components'].get('trailer')
+        if trailer_comp is not None:
+            trailer_emb = float(trailer_comp.get('embodied_emissions', emb))
+            embodied_total += (
+                float(trailer_comp['mass']) * float(p.get('trailers_per_truck', 0)) * trailer_emb
+            )
+        tire_comp = p['components'].get('tire')
+        if tire_comp is not None:
+            embodied_total += float(tire_comp['mass']) * float(tire_comp.get('embodied_emissions', emb))
+        trailer_tire_comp = p['components'].get('trailer_tire')
+        if trailer_tire_comp is not None:
+            tt_emb = float(trailer_tire_comp.get('embodied_emissions', emb))
+            embodied_total += float(trailer_tire_comp['mass']) * tt_emb
         for _, comp in p['components'].items():
             if comp['type'] == 'ess' and 'embodied_emissions' in comp:
                 embodied_total += float(comp['capacity']) * float(comp['embodied_emissions'])
@@ -783,9 +812,10 @@ class Fleet:
             for k in self.K for t in self.years
         }
 
-        self.stock        = {}  # (k, p, model_year, calendar_year) -> trucks
-        self.vehicles     = {}  # (k, p, model_year) -> Vehicles
-        self.market_share = {}  # (k, p, calendar_year) -> fraction [0, 1]
+        self.stock          = {}  # (k, p, model_year, calendar_year) -> trucks
+        self.vehicles       = {}  # (k, p, model_year) -> Vehicles
+        self.market_share   = {}  # (k, p, calendar_year) -> fraction [0, 1]
+        self.penalty_history = {}  # calendar_year -> penalty / penalty_max (ZEV mandate)
 
         self._build_initial_stock()
         if self.policies and self.policies.lcfs:
@@ -813,9 +843,13 @@ class Fleet:
         Non-ZEV powertrains incur `penalty` $/vehicle/yr (at age 0).
         ZEV powertrains receive a rebate scaled so that total payments balance:
             rebate = penalty x (1 - p_zev) / max(p_zev, eps)
-        capped at `penalty` to avoid exploding rebates when p_zev is tiny.
+        Capped at `penalty` by default; uncapped (revenue-neutral) when
+        mandate.revenue_neutral=True, so all penalties are redistributed to ZEV buyers.
         """
-        rebate = min(penalty, penalty * max(1.0 - p_zev, 0.0) / max(p_zev, 1e-9))
+        _mandate = self.policies.zev_mandate if self.policies else None
+        _rn = _mandate.revenue_neutral if _mandate else False
+        raw_rebate = penalty * max(1.0 - p_zev, 0.0) / max(p_zev, 1e-9)
+        rebate = raw_rebate if _rn else min(penalty, raw_rebate)
         for k_ in ([k] if k is not None else self.K):
             for p in self.P[k_]:
                 if (k_, p, t) not in self.vehicles:
@@ -971,6 +1005,9 @@ class Fleet:
                             f"penalty=${penalty:,.0f}. Penalty oscillating after 30 iterations."
                         )
 
+                    if active and p_zev > 1e-9:
+                        self._apply_mandate_penalty(t, penalty, p_zev, k=k)
+
                     warm_pen[k] = penalty if active else 0.0
                     warm_pzv[k] = p_zev   if active else 0.0
 
@@ -1032,8 +1069,13 @@ class Fleet:
                             f"penalty=${penalty:,.0f}. Penalty oscillating after 30 iterations."
                         )
 
+                if active and p_zev > 1e-9:
+                    self._apply_mandate_penalty(t, penalty, p_zev)
+
                 warm_pen = penalty if active else 0.0
                 warm_pzv = p_zev   if active else 0.0
+                if mandate:
+                    self.penalty_history[t] = penalty / mandate.penalty_max
 
     def _calculate_market_share(self, k, t):
         """
@@ -1153,6 +1195,28 @@ class Fleet:
                 shared_def = shared_def.get(p, {})
             comp_copy.update({kk: v for kk, v in shared_def.items() if kk not in comp_copy})
             components[comp_name] = comp_copy
+        components['frame'] = {
+            'type': 'frame',
+            'mass': vehicle_params['frame_mass'],
+            'embodied_emissions': self.params['vehicles']['components']['frame']['embodied_emissions'],
+        }
+        if vehicle_params.get('trailer_mass', 0) > 0:
+            components['trailer'] = {
+                'type': 'trailer',
+                'mass': vehicle_params['trailer_mass'],
+                'embodied_emissions': self.params['vehicles']['components']['trailer']['embodied_emissions'],
+            }
+        components['tire'] = {
+            'type': 'tire',
+            'mass': vehicle_params['tire_mass'],
+            'embodied_emissions': self.params['vehicles']['components']['tire']['embodied_emissions'],
+        }
+        if vehicle_params.get('trailer_tire_mass', 0) > 0:
+            components['trailer_tire'] = {
+                'type': 'tire',
+                'mass': vehicle_params['trailer_tire_mass'],
+                'embodied_emissions': self.params['vehicles']['components']['tire']['embodied_emissions'],
+            }
         vehicle_params['components'] = components
         vehicle_params['model_year'] = y
         exclude = {'target_distance', 'drive_cycle', 'survival_rate', 'average_speed', 'payload'}

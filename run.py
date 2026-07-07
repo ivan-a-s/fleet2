@@ -137,6 +137,21 @@ def _extract(fleet):
         out[f'fuel_usage_{k}_{f}'] = np.array(
             [fleet.fuel_usage.get((k, f, t), 0.0) for t in _YEARS], dtype=np.float32)
 
+    # Per-vehicle NPV at key cohort years (scalar per run, shape () not (T,))
+    for k in fleet.K:
+        for p in fleet.P[k]:
+            for y in (2030, 2040, 2050):
+                if (k, p, y) in fleet.vehicles:
+                    out[f'npv_{k}_{p}_{y}'] = np.float32(fleet.vehicles[k, p, y].npv)
+
+    # Mandate penalty fraction time series (penalty / penalty_max per year)
+    if fleet.penalty_history:
+        arr = np.zeros(_T, dtype=np.float32)
+        for t, frac in fleet.penalty_history.items():
+            if START_YEAR <= t <= END_YEAR:
+                arr[int(t) - START_YEAR] = float(frac)
+        out['mandate_penalty_frac'] = arr
+
     return out
 
 

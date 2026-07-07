@@ -1,7 +1,7 @@
 {
   "scenario": "baseline",
-  "n_runs": 200,
+  "n_runs": 100,
   "seed": 0,
   "tol": 0.05,
-  "wall_time_s": 22.71
+  "wall_time_s": 11.25
 }

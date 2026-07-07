@@ -204,9 +204,9 @@ PARAM_DICT = {
                     "mass": P(1451, src="M. Wang et al., 2024", units="kg"),
                     "embodied_emissions": P(
                         {"dist": "interp", "group": "embodied",
-                         "2025": {"dist": "const",    "val": 2.2},
-                         "2050": {"dist": "triangle",  "min": 0.9, "mode": 1.7, "max": 2.2}},
-                        src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                         "2025": {"dist": "const",    "val": 2.60},
+                         "2050": {"dist": "triangle",  "min": 1.06, "mode": 2.01, "max": 2.60}},
+                        src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     "efficiency": P(
                         {"dist": "interp",
                          "2000": {"dist": "const",   "val": 0.40},
@@ -221,9 +221,9 @@ PARAM_DICT = {
                         "mass": P(104, src="M. Wang et al., 2024", units="kg"),
                         "embodied_emissions": P(
                             {"dist": "interp", "group": "embodied",
-                             "2025": {"dist": "const",   "val": 2.2},
-                             "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                            src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                             "2025": {"dist": "const",   "val": 3.5},
+                             "2050": {"dist": "triangle", "min": 1.43, "mode": 2.70, "max": 3.5}},
+                            src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                         "efficiency": P(0.875, src="Lajevardi et al., 2019",
                                         notes="includes inverter and motor"),
                     },
@@ -231,9 +231,9 @@ PARAM_DICT = {
                         "mass": P(104, src="M. Wang et al., 2024", units="kg"),
                         "embodied_emissions": P(
                             {"dist": "interp", "group": "embodied",
-                             "2025": {"dist": "const",   "val": 2.2},
-                             "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                            src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                             "2025": {"dist": "const",   "val": 3.5},
+                             "2050": {"dist": "triangle", "min": 1.43, "mode": 2.70, "max": 3.5}},
+                            src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                         "efficiency": P(0.875, src="Lajevardi et al., 2019",
                                         notes="includes inverter and motor"),
                     },
@@ -241,9 +241,9 @@ PARAM_DICT = {
                         "mass": P(610, src="M. Wang et al., 2024", units="kg"),
                         "embodied_emissions": P(
                             {"dist": "interp", "group": "embodied",
-                             "2025": {"dist": "const",   "val": 2.2},
-                             "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                            src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                             "2025": {"dist": "const",   "val": 3.5},
+                             "2050": {"dist": "triangle", "min": 1.43, "mode": 2.70, "max": 3.5}},
+                            src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                         "efficiency": P(0.875, src="Lajevardi et al., 2019",
                                         notes="includes inverter and motor"),
                     },
@@ -251,9 +251,9 @@ PARAM_DICT = {
                         "mass": P(537, src="M. Wang et al., 2024", units="kg"),
                         "embodied_emissions": P(
                             {"dist": "interp", "group": "embodied",
-                             "2025": {"dist": "const",   "val": 2.2},
-                             "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                            src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                             "2025": {"dist": "const",   "val": 3.5},
+                             "2050": {"dist": "triangle", "min": 1.43, "mode": 2.70, "max": 3.5}},
+                            src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                         "efficiency": P(0.875, src="Lajevardi et al., 2019",
                                         notes="includes inverter and motor"),
                     },
@@ -261,9 +261,9 @@ PARAM_DICT = {
                         "mass": P(175, src="M. Wang et al., 2024", units="kg"),
                         "embodied_emissions": P(
                             {"dist": "interp", "group": "embodied",
-                             "2025": {"dist": "const",   "val": 2.2},
-                             "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                            src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                             "2025": {"dist": "const",   "val": 3.5},
+                             "2050": {"dist": "triangle", "min": 1.43, "mode": 2.70, "max": 3.5}},
+                            src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                         "efficiency": P(0.875, src="Lajevardi et al., 2019",
                                         notes="includes inverter and motor"),
                     },
@@ -273,34 +273,34 @@ PARAM_DICT = {
                         "mass": P(57, src="M. Wang et al., 2024", units="kg"),
                         "embodied_emissions": P(
                             {"dist": "interp", "group": "embodied",
-                             "2025": {"dist": "const",   "val": 2.2},
-                             "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                            src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                             "2025": {"dist": "const",   "val": 3.13},
+                             "2050": {"dist": "triangle", "min": 1.28, "mode": 2.42, "max": 3.13}},
+                            src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     },
                     "fc": {
                         "mass": P(64, src="M. Wang et al., 2024", units="kg"),
                         "embodied_emissions": P(
                             {"dist": "interp", "group": "embodied",
-                             "2025": {"dist": "const",   "val": 2.2},
-                             "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                            src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                             "2025": {"dist": "const",   "val": 3.13},
+                             "2050": {"dist": "triangle", "min": 1.28, "mode": 2.42, "max": 3.13}},
+                            src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     },
                     "he": {
                         "mass": P(11, src="M. Wang et al., 2024", units="kg"),
                         "embodied_emissions": P(
                             {"dist": "interp", "group": "embodied",
-                             "2025": {"dist": "const",   "val": 2.2},
-                             "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                            src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                             "2025": {"dist": "const",   "val": 3.13},
+                             "2050": {"dist": "triangle", "min": 1.28, "mode": 2.42, "max": 3.13}},
+                            src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     },
                 },
                 "fc": {
                     "mass": P(625, src="M. Wang et al., 2024", units="kg"),
                     "embodied_emissions": P(
                         {"dist": "interp", "group": "embodied",
-                         "2025": {"dist": "const",   "val": 2.2},
-                         "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                        src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                         "2025": {"dist": "const",   "val": 2.96},
+                         "2050": {"dist": "triangle", "min": 1.21, "mode": 2.29, "max": 2.96}},
+                        src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     "efficiency": P(
                         {"dist": "interp",
                          "2025": {"dist": "const",   "val": 0.59},
@@ -361,9 +361,9 @@ PARAM_DICT = {
                         notes="sleeper/FCET"),
                     "embodied_emissions": P(
                         {"dist": "linear", "group": "embodied",
-                         "start": {"dist": "const",    "val": 40.7},
-                         "end":   {"dist": "triangle", "min": 13.6, "mode": 25.7, "max": 33.2}},
-                        src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                         "start": {"dist": "const",    "val": 14.68},
+                         "end":   {"dist": "triangle", "min": 6.01, "mode": 11.34, "max": 14.68}},
+                        src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab: Hydrogen Storage System); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     "usable_capacity": P(0.9, src="Table 16"),
                     "refuel_rate":     P(480, src="Table 16", units="kg/hr"),
                 },
@@ -374,9 +374,9 @@ PARAM_DICT = {
                         notes="day-cab and straight truck"),
                     "embodied_emissions": P(
                         {"dist": "linear", "group": "embodied",
-                         "start": {"dist": "const",    "val": 40.7},
-                         "end":   {"dist": "triangle", "min": 13.6, "mode": 25.7, "max": 33.2}},
-                        src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                         "start": {"dist": "const",    "val": 14.68},
+                         "end":   {"dist": "triangle", "min": 6.01, "mode": 11.34, "max": 14.68}},
+                        src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab: Hydrogen Storage System); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     "usable_capacity": P(0.9, src="Table 17"),
                     "refuel_rate":     P(480, src="Table 17", units="kg/hr"),
                 },
@@ -388,9 +388,9 @@ PARAM_DICT = {
                     "mass":       P(445,  src="M. Wang et al., 2024", units="kg"),
                     "embodied_emissions": P(
                         {"dist": "interp", "group": "embodied",
-                         "2025": {"dist": "const",   "val": 2.2},
-                         "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                        src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                         "2025": {"dist": "const",   "val": 2.45},
+                         "2050": {"dist": "triangle", "min": 1.00, "mode": 1.89, "max": 2.45}},
+                        src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                 },
                 "electric_transmission": {
                     "efficiency": P(0.97,
@@ -398,14 +398,44 @@ PARAM_DICT = {
                     "mass":       P(204, src="M. Wang et al., 2024", units="kg"),
                     "embodied_emissions": P(
                         {"dist": "interp", "group": "embodied",
-                         "2025": {"dist": "const",   "val": 2.2},
-                         "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                        src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
+                         "2025": {"dist": "const",   "val": 2.45},
+                         "2050": {"dist": "triangle", "min": 1.00, "mode": 1.89, "max": 2.45}},
+                        src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab); decline trajectory from World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                 },
             },
 
             "accessories": {
                 "after_treatment": {},
+            },
+
+            "frame": {
+                "embodied_emissions": P(
+                    {"dist": "interp", "group": "embodied",
+                     "2025": {"dist": "const",    "val": 3.83},
+                     "2050": {"dist": "triangle", "min": 1.57, "mode": 2.96, "max": 3.83}},
+                    src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab: Chassis w/o battery + Body combined); decline trajectory from World Steel Association, 2025; IEA, 2020",
+                    units="kgCO2/kg",
+                    notes="shared across vehicle types; each vehicle type supplies its own frame_mass"),
+            },
+
+            "trailer": {
+                "embodied_emissions": P(
+                    {"dist": "interp", "group": "embodied",
+                     "2025": {"dist": "const",    "val": 3.78},
+                     "2050": {"dist": "triangle", "min": 1.55, "mode": 2.92, "max": 3.78}},
+                    src="Argonne GREET2, 2025 (MHDV_Trailer_Comp_Sum: Body + Chassis + Auxiliary, mass-weighted by one-time material composition, not GREET's own per-lifetime total which bundles tire replacements into Chassis); decline trajectory from World Steel Association, 2025; IEA, 2020",
+                    units="kgCO2/kg",
+                    notes="shared across sleeper/day_cab (the only vehicle types with a trailer); each supplies its own trailer_mass"),
+            },
+
+            "tire": {
+                "embodied_emissions": P(
+                    {"dist": "interp", "group": "embodied",
+                     "2025": {"dist": "const",    "val": 3.30},
+                     "2050": {"dist": "triangle", "min": 1.35, "mode": 2.55, "max": 3.30}},
+                    src="Argonne GREET2, 2025 (MHDV_Comp_Sum/MHDV_Trailer_Comp_Sum: 66.7% rubber, 33.3% steel, uniform across steer/drive/trailer tires); decline trajectory from World Steel Association, 2025; IEA, 2020",
+                    units="kgCO2/kg",
+                    notes="shared across all tire positions and vehicle types; lifetime tire-replacement mass (not instantaneous physical mass) supplied per vehicle type via tire_mass/trailer_tire_mass"),
             },
         },
 
@@ -484,13 +514,12 @@ PARAM_DICT = {
                     "frame_mass":         P(6051,  src="UNREF -- paper (Table 11) shows 6,052 kg; M. Wang et al., 2024",
                                             units="kg"),
                     "trailer_mass":       P(5029,  src="M. Wang et al., 2024", units="kg"),
+                    "tire_mass":          P(2068.38, src="Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab: steer 7 replacements x 2 tires + drive 3 x 8, @ 120 lbs/tire)",
+                                            units="kg", notes="lifetime tire-replacement mass, not instantaneous physical mass"),
+                    "trailer_tire_mass":  P(4354.49, src="Argonne GREET2, 2025 (MHDV_Trailer_Comp_Sum: 10 replacements x 8 tires @ 120 lbs/tire)",
+                                            units="kg", notes="tire wear is distance-driven, not swap-driven; NOT multiplied by trailers_per_truck, unlike the trailer's own structural mass"),
                     "mass_correction":    P(0.2,   src="Gilleon et al., 2022"),
                     "p_weighed_out":      P(0.3,   src="EPA, 2011"),
-                    "embodied_emissions": P(
-                        {"dist": "interp", "group": "embodied",
-                         "2025": {"dist": "const",   "val": 2.2},
-                         "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                        src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     "driver_cost":        P(0.38,  src="Table 21", units="CAD/km",
                                             notes="informed by communication with BC Trucking Association"),
                     "drag_coef": P(
@@ -674,13 +703,12 @@ PARAM_DICT = {
                     "roll_coef":          P(0.0054, notes="model internal"),
                     "frame_mass":         P(5380,  src="M. Wang et al., 2024", units="kg"),
                     "trailer_mass":       P(5029,  src="M. Wang et al., 2024", units="kg"),
+                    "tire_mass":          P(1366.83, src="Argonne GREET2, 2025 sleeper tire schedule (2068.38 kg) scaled by day_cab/sleeper survival-weighted lifetime distance ratio (0.661) x wheel-count ratio (10/10 = 1.0; same 3-axle tractor as sleeper per GREET's Class 8 Day-Cab Trucks)",
+                                            units="kg", notes="lifetime tire-replacement mass, not instantaneous physical mass"),
+                    "trailer_tire_mass":  P(4354.49, src="Argonne GREET2, 2025 (MHDV_Trailer_Comp_Sum: 10 replacements x 8 tires @ 120 lbs/tire; same trailer as sleeper)",
+                                            units="kg", notes="tire wear is distance-driven, not swap-driven; NOT multiplied by trailers_per_truck, unlike the trailer's own structural mass"),
                     "mass_correction":    P(0.2,   src="Gilleon et al., 2022"),
                     "p_weighed_out":      P(0.3,   src="EPA, 2011"),
-                    "embodied_emissions": P(
-                        {"dist": "interp", "group": "embodied",
-                         "2025": {"dist": "const",   "val": 2.2},
-                         "2050": {"dist": "triangle", "min": 0.9, "mode": 1.7, "max": 2.2}},
-                        src="World Steel Association, 2025; IEA, 2020", units="kgCO2/kg"),
                     "driver_cost":        P(0.48, src="Table 21", units="CAD/km",
                                             notes="informed by communication with BC Trucking Association"),
                     "drag_coef": P(
@@ -863,12 +891,10 @@ PARAM_DICT = {
                     "frame_mass":         P(8600,  src="M. Wang et al., 2024", units="kg",
                                             notes="day cab * 1.46 for box and liftgate"),
                     "trailer_mass":       P(0,     src="Table 13", notes="no trailer"),
+                    "tire_mass":          P(291.38, src="Argonne GREET2, 2025 sleeper tire schedule (2068.38 kg) scaled by straight/sleeper survival-weighted lifetime distance ratio (0.235) x wheel-count ratio (6/10 = 0.6; 2 steer + 4 drive per GREET's Class 6 PnD Trucks vs sleeper's 2 + 8)",
+                                            units="kg", notes="lifetime tire-replacement mass, not instantaneous physical mass"),
                     "mass_correction":    P(0.2,   src="Gilleon et al., 2022"),
                     "p_weighed_out":      P(0.3,   src="EPA, 2011"),
-                    "embodied_emissions": P(
-                        {"dist": "const", "val": 2.0, "group": "embodied"},
-                        src="UNREF -- paper (Table 10) shows 2025=2.2 kgCO2/kg with temporal progression; params.py uses constant 2.0",
-                        units="kgCO2/kg"),
                     "driver_cost":        P(0.50, src="Table 21", units="CAD/km",
                                             notes="informed by communication with BC Trucking Association"),
                     "drag_coef": P(

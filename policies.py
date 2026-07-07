@@ -63,47 +63,56 @@ class LCFS:
     """
     BC Low Carbon Fuel Standard.
 
-    Vehicles using fuels with CI above the allowable standard incur a deficit cost;
-    those using low-CI fuels (electricity, H2) earn credits (negative cost).
+    Per-fuel cost formula (summed over all fuels f consumed by the vehicle):
+        cost = annual_fuel[f] x (CI_f - TCI_J x EER_f x LHV_f) x credit_price / 1000
 
-    Annual cost per vehicle:
-        annual_distance x (actual_CI_per_km - baseline_CI_per_km x (1 - target[year]))
-        x credit_price / 1000
+    where:
+        CI_f   = supply + use emissions intensity of fuel f (kgCO2e per unit fuel)
+        TCI_J  = _DIESEL_CI / diesel_lhv x (1 - target[year])   (kgCO2e/J; age array)
+        EER_f  = eer[v.p] for non-diesel fuels; 1.0 for diesel always
+        LHV_f  = lower heating value of fuel f (J per unit fuel)
 
-    baseline_CI_per_km is calibrated from the 2025 diesel vehicle after Fleet builds
-    its initial stock -- call set_baseline_fc(k, v) for each vehicle type before _run().
+    Positive cost = deficit (fuel CI above target); negative cost = credit.
+
+    eer: {powertrain: float} -- EER for the primary non-diesel fuel of that powertrain.
+         Powertrains not listed default to 1.0 (diesel-equivalent treatment for all fuels).
+         Diesel fuel always uses EER=1.0 regardless of powertrain.
 
     credit_price: $/tCO2e  (default 300)
     start_target: CI reduction fraction required in START_YEAR (default 0.183 = 18.3%)
     end_target:   CI reduction fraction required in END_YEAR   (default 0.76  = 76%)
     """
-    # Diesel CI from data.json fuels.diesel: supply 0.88 + use 2.52 kgCO2e/L
+    # Diesel CI: supply 0.88 + use 2.52 kgCO2e/L (from params.py fuels.diesel)
     _DIESEL_CI = 0.88 + 2.52
 
     def __init__(self, credit_price: float = 300.0,
-                 start_target: float = 0.183, end_target: float = 0.76):
+                 start_target: float = 0.183, end_target: float = 0.76,
+                 eer: dict = None):
         self._credit_price = float(credit_price)
+        self._eer          = dict(eer) if eer else {}
         years = np.arange(_YEAR0, END_YEAR + 1)
         arr   = np.zeros(len(years))
         mask  = years >= START_YEAR
         arr[mask] = np.linspace(start_target, end_target, int(mask.sum()))
-        self._target_arr  = arr.astype(np.float32)
-        self._baseline_fc = {}   # {k: L/km} -- set by Fleet after _build_initial_stock()
+        self._target_arr = arr.astype(np.float32)
 
     def set_baseline_fc(self, k, v):
-        """Calibrate baseline diesel FC for vehicle type k from its age-0 fuel consumption."""
-        self._baseline_fc[k] = float(v.annual_fuel['diesel'][0]) / max(float(v.annual_distance[0]), 1.0)
+        pass   # kept for API compatibility with model.py; no longer used
 
     def apply(self, v):
-        if v.k not in self._baseline_fc:
-            return  # calibration not yet done; leave annual_cost['lcfs'] as zeros
-        idx          = np.clip(v.operation_years - _YEAR0, 0, len(self._target_arr) - 1)
-        target       = self._target_arr[idx]
-        actual_ci    = (v.emissions_supply + v.emissions_use) / np.maximum(v.annual_distance, 1.0)
-        baseline_ci  = self._DIESEL_CI * self._baseline_fc[v.k] * (1.0 - target)
-        v.annual_cost['lcfs'] = (
-            v.annual_distance * (actual_ci - baseline_ci) * self._credit_price / 1000.0
-        ).astype(np.float32)
+        idx        = np.clip(v.operation_years - _YEAR0, 0, len(self._target_arr) - 1)
+        target     = self._target_arr[idx]
+        diesel_lhv = float(v._all_fuels['diesel']['lhv'])
+        tci_per_j  = self._DIESEL_CI / diesel_lhv * (1.0 - target)   # kgCO2e/J, age array
+        eer        = self._eer.get(v.p, 1.0)
+        lcfs_cost  = np.zeros(len(v.age))
+        for f, annual_vol in v.annual_fuel.items():
+            ei    = v.fuels[f]['emissions_intensity']
+            ci_f  = float(ei['supply']) + float(ei['use'])   # kgCO2e per unit fuel
+            lhv_f = float(v.fuels[f]['lhv'])
+            eer_f = 1.0 if f == 'diesel' else eer
+            lcfs_cost += annual_vol * (ci_f - tci_per_j * eer_f * lhv_f)
+        v.annual_cost['lcfs'] = (lcfs_cost * self._credit_price / 1000.0).astype(np.float32)
 
 
 class ZEVMandate:
@@ -120,9 +129,11 @@ class ZEVMandate:
     scope   : 'fleet' (aggregate ZEV share across all k) or 'per_k' (independent per type)
     """
 
-    def __init__(self, targets: dict, penalty: float, scope: str = 'fleet'):
-        self.scope       = scope
-        self.penalty_max = float(penalty)
+    def __init__(self, targets: dict, penalty: float, scope: str = 'fleet',
+                 revenue_neutral: bool = False):
+        self.scope           = scope
+        self.penalty_max     = float(penalty)
+        self.revenue_neutral = revenue_neutral
         years            = np.arange(_YEAR0, END_YEAR + 1)
 
         if scope == 'per_k':

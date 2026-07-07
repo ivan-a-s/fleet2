@@ -189,6 +189,60 @@ def tco(fleet, k='sleeper'):
     _legend(ax, keys, col, loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
     plt.tight_layout()
 
+def _embodied_components(v):
+    """
+    Per-component lifetime embodied emissions (kgCO2e) for one Vehicles cohort.
+    Mirrors model.py Vehicles._calculate_emissions -- keep in sync if that logic changes.
+    frame/trailer/tire/trailer_tire are lump sums at age 0 (per the model's own treatment);
+    the fuel-cell stack's replacement emissions are the only age>0 contribution, so they're
+    survival-weighted here to match how supply/use emissions are aggregated below.
+    """
+    p = v.params
+    frame_emb = float(p['components']['frame']['embodied_emissions'])
+    comps = {'frame': float(p['components']['frame']['mass']) * frame_emb}
+
+    trailer = p['components'].get('trailer')
+    if trailer is not None:
+        t_emb = float(trailer.get('embodied_emissions', frame_emb))
+        comps['trailer'] = float(trailer['mass']) * float(p.get('trailers_per_truck', 0)) * t_emb
+
+    tire = p['components'].get('tire')
+    if tire is not None:
+        comps['tire'] = float(tire['mass']) * float(tire.get('embodied_emissions', frame_emb))
+
+    trailer_tire = p['components'].get('trailer_tire')
+    if trailer_tire is not None:
+        tt_emb = float(trailer_tire.get('embodied_emissions', frame_emb))
+        comps['trailer_tire'] = float(trailer_tire['mass']) * tt_emb
+
+    for name, comp in p['components'].items():
+        if name in ('frame', 'trailer', 'tire', 'trailer_tire'):
+            continue
+        if comp['type'] == 'ess' and 'embodied_emissions' in comp:
+            comps[name] = float(comp['capacity']) * float(comp['embodied_emissions'])
+        elif comp['type'] in ('converter', 'transmission') and 'mass' in comp:
+            comps[name] = float(comp['mass']) * float(comp.get('embodied_emissions', frame_emb))
+
+    fc_comp = p['components'].get('fc')
+    if fc_comp is not None and np.any(v.fc_replacements > 0):
+        surv     = np.asarray(p['survival_rate'])
+        comp_emb = float(fc_comp.get('embodied_emissions', frame_emb))
+        comps['fc_replacements'] = float(np.sum(v.fc_replacements * surv)) * float(fc_comp['mass']) * comp_emb
+
+    return comps
+
+def _unique_embodied_keys(fleet, k):
+    """All unique non-zero embodied-component keys across every vehicle of type k."""
+    seen = []
+    for p in fleet.P[k]:
+        for y in SAMPLE_YEARS:
+            if (k, p, y) not in fleet.vehicles:
+                continue
+            for key, val in _embodied_components(fleet.vehicles[k, p, y]).items():
+                if key not in seen and val != 0:
+                    seen.append(key)
+    return seen
+
 def lca_emissions(fleet, k='sleeper'):
     fig, ax = plt.subplots(figsize=(14, 8))
     ax.set_title(f'Lifetime LCA emissions -- {K_LABELS.get(k, k)}')
@@ -199,7 +253,7 @@ def lca_emissions(fleet, k='sleeper'):
         v = fleet.vehicles[k, p, y]
         surv = np.array(v.params['survival_rate'])
         comps = {
-            'embodied': float(v.embodied[0]) / 1000,
+            'embodied': sum(_embodied_components(v).values()) / 1000,
             'supply':   float(np.sum(v.emissions_supply * surv)) / 1000,
             'use':      float(np.sum(v.emissions_use    * surv)) / 1000,
         }
@@ -207,6 +261,25 @@ def lca_emissions(fleet, k='sleeper'):
         ax.text(y + offset, total * 1.01, PT_LABELS.get(p, p), ha='center', va='bottom', fontsize=9, rotation=90)
     ax.set_xticks(SAMPLE_YEARS)
     _legend(ax, lca_keys, col, loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
+    plt.tight_layout()
+
+def embodied_emissions(fleet, k='sleeper'):
+    """Embodied emissions broken down by physical component (frame, trailer, tire,
+    ICE, motor, battery, H2 tank, etc.), one stacked bar per powertrain x sample year --
+    same layout as capital_cost/tco/npv. Complements lca_emissions, which only shows the
+    embodied/supply/use split without opening up what's inside 'embodied'."""
+    fig, ax = plt.subplots(figsize=(14, 8))
+    ax.set_title(f'Embodied emissions breakdown -- {K_LABELS.get(k, k)}')
+    ax.set_ylabel('tCO2e (lifetime)')
+    keys = _unique_embodied_keys(fleet, k)
+    col  = _colours(keys)
+    for p, y, offset, width in _iter_pys(fleet, k):
+        v = fleet.vehicles[k, p, y]
+        comps = {kk: vv / 1000 for kk, vv in _embodied_components(v).items()}
+        total = _stacked_bar(ax, y + offset, comps, width, col)
+        ax.text(y + offset, total * 1.01, PT_LABELS.get(p, p), ha='center', va='bottom', fontsize=9, rotation=90)
+    ax.set_xticks(SAMPLE_YEARS)
+    _legend(ax, keys, col, loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
     plt.tight_layout()
 
 
@@ -254,6 +327,7 @@ if __name__ == "__main__":
         capital_cost(fleet, k=k)
         # tco(fleet, k=k)
         lca_emissions(fleet, k=k)
+        embodied_emissions(fleet, k=k)
         npv(fleet, k=k)
 
     plt.show()

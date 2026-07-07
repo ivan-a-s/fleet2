@@ -48,7 +48,7 @@ Source: National Research Council, 2010; NRCan, 2025; Statistics Canada, 2009
 | Mass correction | 0.2 |  | Gilleon et al., 2022 |
 | Combustion transmission efficiency | 0.95 |  | Gilleon et al., 2022 |
 | Electric transmission efficiency | 0.97 |  | UNREF -- paper (Table 14) shows 96%; params.py uses 0.97 |
-| Embodied emissions (non-battery) | 2025: 2.2; 2050: triangular(0.9,1.7,2.2) | kgCO2/kg | World Steel Association, 2025; IEA, 2020 |
+| Frame embodied emissions | 2025: 3.83; 2050: triangular(1.57,2.96,3.83) | kgCO2/kg | Argonne GREET2, 2025 (MHDV_Comp_Sum, Class 8 Sleeper-Cab: Chassis w/o battery + Body combined); decline trajectory from World Steel Association, 2025; IEA, 2020 |
 | Li-ion BESS specific mass | 2025: 6.0; 2035: 3.34-5.57; 2050: triangular(1.74,3.34,5.57) | kg/kWh | Haghbin et al., 2025; Jose et al., 2025; Tiede et al., 2022 |
 | Battery degradation (per year) | 0.01 |  | NREL, 2023 |
 | Battery degradation (per cycle) | 2e-05 |  | NREL, 2023 |
@@ -188,7 +188,6 @@ Each is flagged with UNREF in the source column above.
 |---|---|---|---|
 | initial_activity | 47,361,761,620 t-km | 48.9 Gt-km | Table A1 |
 | straight drag_coef (2025) | 0.65 | 0.60 | Table A6 |
-| straight embodied_emissions | const 2.0 kgCO2/kg | 2025: 2.2, 2050: triangular | Table A4 |
 | charger_50kw (2030 max) | 54,000 CAD | 60,000 CAD | Table A11 |
 | electric_transmission efficiency | 0.97 | 96% | Table A4 |
 | sleeper hice accessory_load | 3,400 W | 4,250 W | Table A9 |
