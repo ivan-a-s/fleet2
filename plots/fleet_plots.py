@@ -98,7 +98,7 @@ if __name__ == "__main__":
     p.plot_by_inner(outputs['Emissions'],
                     title='Fleet LCA emissions',
                     x_label='Year', y_label='MtCO2e / year',
-                    add_total=True, color_map=EMIS_COLOR)
+                    add_total=True, color_map=EMIS_COLOR, emissions_2007=True)
 
     p.plot_by_inner(outputs['Cost'],
                     title='System costs',

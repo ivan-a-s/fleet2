@@ -8,5 +8,4 @@ old/*
 !old/data_old.py
 
 results/
-CLAUDE.md
 POLICY_PLAN.md

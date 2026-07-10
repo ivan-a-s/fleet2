@@ -34,6 +34,17 @@ PARAM_DICT = {
         "autonomous_t50":        P(2040,    notes="model uses 2040 point estimate; paper Table 10 shows triangular(2035,2040,2070) for scenario analysis"),
         "price_lambda":          P(0.00003, src="Table 7", notes="logit scale; market sensitivity"),
         "social_cost_of_carbon": P(59.276,  units="CAD/tCO2e", notes="model internal; not in Appendix A"),
+        "revenue_markup":        P(1.2, src="UNREF -- assumption", units="dimensionless",
+                                   notes="Freight revenue per t-km is set to this multiple of the "
+                                         "prior year's realized system+policy cost per t-km"),
+        "emissions_2007_factor": P(1.344827, units="dimensionless",
+                                   src="Government of B.C., 2023b",
+                                   notes="2025 BC HDT sector emissions / 2007 BC HDT sector emissions. "
+                                         "Government of B.C. (2023b). Transportation Sector British Columbia "
+                                         "and Territories Table 27: Truck Secondary Energy Use and GHG "
+                                         "Emissions by Truck Type | Natural Resources Canada. "
+                                         "https://oee.nrcan.gc.ca/corporate/statistics/neud/dpa/showTable.cfm"
+                                         "?type=CP&sector=tran&juris=bct&year=2022&rn=27&page=0"),
     },
 
     "drive_cycles": {

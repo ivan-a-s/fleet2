@@ -7,11 +7,8 @@ deterministic Fleet run (all uncertain parameters at median, cp=0.5).
 Run from the fleet2 root:
     pytest verification/test_fleet_consistency.py -v
 
-    
-Or paste this in the interactive window:
+Or paste this in the interactive window (cd to the fleet2 root first):
 
-import os
-os.chdir(r"c:\Users\ivana\OneDrive - UBC\PhD\Paper 2\Code\Laptop\fleet2")
 import pytest
 pytest.main(["verification/test_fleet_consistency.py", "-v"])
 

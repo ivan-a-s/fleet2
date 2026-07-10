@@ -16,13 +16,8 @@ The simulation proceeds in three layers:
   3. Aggregate -- totals over the stock for fuel use, emissions, and system costs.
 
 To do:
- Needs changing now:
-
  Needs changing later:
- - Make the git accessible but not all of it to everyone (clean without changing old code).
- - Policy net revenue plots.
  - Uncertainty analysis (reduce params?).
- - Set the revenue dynamically.
  - HDRD should be in the diesel pool (may become more available as passenger EV market grows).
 
  Nice to have (in order of priority):
@@ -38,6 +33,8 @@ To do:
  - Improve the battery accessory load estimation.
  - Activity price elasticity.
  - Add autonomous vehicles again.
+ - Convervative behavioiur (favour incumbent).
+ - Nested logit (all diesel compete together).
  - Simplify params (one motor and then just change the mass with the powertrain etc.)
 
  Checked up to:
@@ -204,15 +201,18 @@ class Vehicles:
     costs  -- full (unsliced) vehicle cost arrays from PARAMS['vehicles']['costs']
     p            -- powertrain key string, e.g. 'dice', 'be', 'fc'
     k            -- vehicle type key string, e.g. 'sleeper', 'day_cab', 'straight'
+    foresight    -- 0..1, how much of the future fuel-price / FC-replacement-cost trajectory
+                    this cohort "knows" at construction (see _calculate_annual_cost).
     """
 
-    def __init__(self, params, fuels, costs, p, k):
+    def __init__(self, params, fuels, costs, p, k, foresight=0.0):
         self.params       = params
         self._all_fuels   = fuels                                    # full dict -- needed for en-route fast_charge pricing
         self.fuels        = {f: fuels[f] for f in params['fuels']}
         self.costs        = costs
         self.p            = p
         self.k            = k
+        self.foresight    = float(foresight)
         self.age          = np.arange(params['max_age'], dtype=int)
         self.model_year   = int(params['model_year'])
         self.operation_years = self.model_year + self.age
@@ -655,13 +655,19 @@ class Vehicles:
         return float(val)
 
     def _op_cost_array(self, key):
-        """Get cost array indexed to operation years (one value per age)."""
+        """
+        Get cost array indexed to operation years (one value per age), blended toward the
+        construction-year ('present') value by self.foresight: 0 = frozen at model_year for
+        the whole life (no foresight), 1 = actual future trajectory (full foresight).
+        """
         val = self.costs.get(key)
         if val is None:
             return np.zeros(len(self.age))
         if isinstance(val, np.ndarray):
-            idx = np.clip(self.operation_years - self._Y_start, 0, len(val) - 1)
-            return val[idx].astype(float)
+            idx_future  = np.clip(self.operation_years - self._Y_start, 0, len(val) - 1)
+            idx_present = np.clip(self.model_year      - self._Y_start, 0, len(val) - 1)
+            blended = (1.0 - self.foresight) * val[idx_present] + self.foresight * val[idx_future]
+            return blended.astype(float)
         return np.full(len(self.age), float(val))
 
     def _calculate_capital_cost(self):
@@ -720,21 +726,27 @@ class Vehicles:
           capital        -- full purchase price at age 0, zero thereafter.  Placed here
                            (rather than amortised) so _discount() gives the correct NPV.
           operational    -- maintenance, tyres, etc. proportional to km driven (actual distance).
-          fuel           -- fuel cost in source units x time-varying price.
+          fuel           -- fuel cost in source units x time-varying price, blended between
+                           the construction-year price and the actual future price by
+                           self.foresight (0 = frozen at construction year, 1 = actual future
+                           trajectory -- see class docstring).
                            For slow-charge BETs with en-route fast charging, km driven via
                            en-route stops are re-billed at fast-charge rates with a different
                            efficiency: grid_kWh = km x slow_fc x slow_eff / fast_eff.
           driver         -- wage proportional to target_distance (not actual), because the
                            driver is paid whether or not the vehicle is range-constrained.
-          fc_replacements -- time-varying $/kW x stack capacity at each replacement age.
+          fc_replacements -- time-varying $/kW x stack capacity at each replacement age,
+                           also subject to self.foresight (see _op_cost_array).
 
         Revenue is also computed here: annual_distance x payload_tonnes x revenue_per_tkm.
         """
         fuel_cost = np.zeros(len(self.age))
         for f, annual in self.annual_fuel.items():
-            cost_arr = np.asarray(self.fuels[f]['cost'])
-            idx      = np.clip(self.operation_years - self._Y_start, 0, len(cost_arr) - 1)
-            fuel_cost += annual * cost_arr[idx]
+            cost_arr    = np.asarray(self.fuels[f]['cost'])
+            idx_future  = np.clip(self.operation_years - self._Y_start, 0, len(cost_arr) - 1)
+            idx_present = np.clip(self.model_year      - self._Y_start, 0, len(cost_arr) - 1)
+            price = (1.0 - self.foresight) * cost_arr[idx_present] + self.foresight * cost_arr[idx_future]
+            fuel_cost += annual * price
 
         # FC replacement cost (time-varying $/kW x capacity x replacement events)
         fc_comp = self.params['components'].get('fc')
@@ -789,7 +801,19 @@ def _market_share_limit(prev_share, init, cagr_nacent, cagr_mature, threshold=0.
 
 
 class Fleet:
-    def __init__(self, params, param_cps, policies=None, exclude_powertrains=()):
+    def __init__(self, params, param_cps, policies=None, exclude_powertrains=(), foresight=0.0):
+        """
+        foresight -- 0..1, how much of the future fuel-price / FC-replacement-cost
+                     trajectory vehicles "know" at construction (see Vehicles docstring).
+                     0 (default) = frozen at each cohort's own construction-year price for
+                     its whole life, matching how the Paper 1 reference model (old/model_old.py)
+                     was actually run in every reported scenario. 1 = perfect foresight of the
+                     realized future trajectory. Carbon tax and LCFS always use the actual
+                     future policy schedule regardless of this setting (announced/legislated,
+                     not a market forecast); initial capital cost is always frozen at
+                     construction year; revenue_per_tkm is already backward-looking by
+                     construction and has no foresight to toggle.
+        """
         self.params = copy.deepcopy(params)
         self.realise_uncertainties(param_cps)
         self.params = convert_to_float32(self.params)
@@ -802,6 +826,7 @@ class Fleet:
         self.years        = np.arange(START_YEAR, END_YEAR + 1)
         self.price_lambda = float(self.params['fleet']['price_lambda'])
         self.policies     = policies
+        self.foresight    = float(foresight)
 
         # Activity requirement (t-km/year) by vehicle type and calendar year
         init_act   = float(self.params['fleet']['initial_activity'])
@@ -816,6 +841,8 @@ class Fleet:
         self.vehicles       = {}  # (k, p, model_year) -> Vehicles
         self.market_share   = {}  # (k, p, calendar_year) -> fraction [0, 1]
         self.penalty_history = {}  # calendar_year -> penalty / penalty_max (ZEV mandate)
+        self.cost_per_tkm_history    = {}  # (k, calendar_year) -> realized system+policy cost per t-km
+        self.revenue_per_tkm_history = {}  # (k, calendar_year) -> revenue_per_tkm applied that year
 
         self._build_initial_stock()
         if self.policies and self.policies.lcfs:
@@ -830,7 +857,8 @@ class Fleet:
         params = self.select_vehicle_params(k, p, t)
         if self.policies:
             self.policies.pre_apply(params, k=k, p=p, t=t)
-        v = Vehicles(params, self.params['fuels'], self.params['vehicles']['costs'], p=p, k=k)
+        v = Vehicles(params, self.params['fuels'], self.params['vehicles']['costs'], p=p, k=k,
+                     foresight=self.foresight)
         if self.policies:
             self.policies.apply(v)
         return v
@@ -899,9 +927,79 @@ class Fleet:
                     / denom
                 )
 
+    def _system_cost_per_tkm(self, year):
+        """
+        Realized system+policy cost per t-km for each vehicle type, from the fleet as it
+        stands at `year` (all cohorts currently in self.stock/self.vehicles).
+
+        total_cost sums all 8 categories in v.annual_cost (capital, operational, fuel,
+        driver, fc_replacements, carbon_tax, lcfs, zev_mandate) rather than referencing
+        COST_CATEGORIES directly, so it can't drift out of sync with what annual_cost
+        actually contains.
+
+        total_tkm reuses the stock x annual_distance x payload/1000 formula used for
+        activity_met elsewhere in this file.
+
+        Called at the top of each _run() iteration with year = t-1.  Not used for
+        t == START_YEAR -- see _new_vehicle_cost_per_tkm for why.
+        """
+        result = {}
+        for k in self.K:
+            total_cost = 0.0
+            total_tkm  = 0.0
+            for p in self.P[k]:
+                for y in range(year - MAX_AGE + 1, year + 1):
+                    if (k, p, y) not in self.vehicles:
+                        continue
+                    n = self.stock.get((k, p, y, year), 0.0)
+                    if n == 0.0:
+                        continue
+                    v = self.vehicles[k, p, y]
+                    a = year - y
+                    total_cost += n * sum(c[a] for c in v.annual_cost.values())
+                    total_tkm  += n * v.annual_distance[a] * float(np.asarray(v.mass['payload'])[a]) / 1000.0
+            result[k] = total_cost / max(total_tkm, 1e-9)
+        return result
+
+    def _new_vehicle_cost_per_tkm(self, k):
+        """
+        Survival-weighted lifetime cost per t-km for a brand-new diesel vehicle built at
+        START_YEAR, used only as the revenue bootstrap for t == START_YEAR ("the cost
+        for diesel").
+
+        The pre-existing historical stock built by _build_initial_stock() only contains
+        ages 1..MAX_AGE-1 at START_YEAR (the oldest cohort is a sizing reference, never
+        added to self.stock) -- no cohort is ever at age 0 there, so it carries zero
+        capital cost and understates the true cost of a new vehicle.  Every subsequent
+        year's _system_cost_per_tkm() naturally includes that year's own new purchases
+        (with capital cost) in its cross-sectional blend; using a throwaway brand-new
+        vehicle here (same pattern as the LCFS baseline throwaway in __init__) is the
+        closest match for year 1, where no such blend yet exists.
+
+        Uses the full lifetime (all ages), weighted by survival_rate but NOT time-
+        discounted, matching the undiscounted cash-basis convention of
+        _system_cost_per_tkm -- just applied to a single (synthetic) vintage rather
+        than a real cross-section of many.  Age 0 alone is not representative: this
+        vehicle type's target_distance follows a logistic ramp-up with age (Statistics
+        Canada CVS data), so a brand-new vehicle's first-year utilization is well below
+        its lifetime average, which would inflate cost/tkm if age 0 were used alone.
+        """
+        v    = self._make_vehicle(k, 'dice', START_YEAR)
+        surv = np.asarray(v.params['survival_rate'])
+        total_cost = sum(float((c * surv).sum()) for c in v.annual_cost.values())
+        total_tkm  = float((v.annual_distance * np.asarray(v.mass['payload']) / 1000.0 * surv).sum())
+        return total_cost / max(total_tkm, 1e-9)
+
     def _run(self):
         """
         Year-by-year simulation START_YEAR -> END_YEAR.  Each year has three steps:
+
+        0. Revenue update: freight revenue_per_tkm for year t is set to
+           fleet.revenue_markup x the realized system+policy cost per t-km from year
+           t-1 (_system_cost_per_tkm), or -- for t == START_YEAR, where no simulated
+           prior year exists -- x a brand-new diesel vehicle's own age-0 cost per t-km
+           (_new_vehicle_cost_per_tkm).  Mutates self.params so that
+           select_vehicle_params() picks it up when Step 2 builds this year's vehicles.
 
         1. Roll-over: surviving vehicles from t-1 advance one year.  Stock is scaled by
            the conditional survival ratio  survival_rate[a] / survival_rate[a-1]  rather
@@ -933,6 +1031,18 @@ class Fleet:
             warm_pzv = 0.0
 
         for t in self.years:
+            # --- Step 0: update revenue_per_tkm from the prior year's realized cost ---
+            if t == START_YEAR:
+                cost_per_tkm = {k: self._new_vehicle_cost_per_tkm(k) for k in self.K}
+            else:
+                cost_per_tkm = self._system_cost_per_tkm(t - 1)
+            markup = float(self.params['fleet']['revenue_markup'])
+            for k in self.K:
+                revenue = np.float32(markup * cost_per_tkm[k])
+                self.params['vehicles']['types'][k]['shared']['revenue_per_tkm'] = revenue
+                self.cost_per_tkm_history[k, t]    = cost_per_tkm[k]
+                self.revenue_per_tkm_history[k, t] = float(revenue)
+
             # --- Step 1: roll surviving cohorts from t-1 ---
             if t > START_YEAR:
                 for k in self.K:

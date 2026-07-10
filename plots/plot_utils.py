@@ -6,6 +6,7 @@ so that fleet_plots.py, vehicle_plots.py, and policy plot files stay consistent.
 """
 import numpy as np
 import matplotlib.pyplot as plt
+from data import EMISSIONS_2007_FACTOR
 
 # ---------------------------------------------------------------------------
 # Style
@@ -161,6 +162,29 @@ def _legend(ax, keys, col, **kw):
     ax.legend(handles, labels, **kw)
 
 # ---------------------------------------------------------------------------
+# "% of 2007 levels" secondary axis
+# ---------------------------------------------------------------------------
+
+def year0_value(arr):
+    """Mean value at the first year (2025) of a 1-D single-run or 2-D MC (n_runs, T) array."""
+    arr = np.asarray(arr, dtype=float)
+    return float(np.mean(arr[:, 0])) if arr.ndim == 2 else float(arr[0])
+
+def add_2007_axis(ax, baseline_2025, target_reduction=80):
+    """
+    Add a right-hand twin axis showing emissions as a % of 2007 levels, plus a red
+    dashed line at the target reduction level (default 80% -> line at 20%).
+    baseline_2025 is the 2025 value of whatever total is plotted on the left axis;
+    2007 levels = baseline_2025 / EMISSIONS_2007_FACTOR.
+    """
+    emissions_2007 = baseline_2025 / EMISSIONS_2007_FACTOR
+    axp = ax.twinx()
+    axp.set_ylim(0, ax.get_ylim()[1] / emissions_2007 * 100)
+    axp.axhline(100 - target_reduction, color='red', linestyle='--', linewidth=1.5)
+    axp.set_ylabel('% 2007 levels')
+    return axp
+
+# ---------------------------------------------------------------------------
 # Plotting class -- fleet-level line/area layouts
 # ---------------------------------------------------------------------------
 
@@ -250,11 +274,18 @@ class Plotting:
         return fig, axes
 
     def plot_by_inner(self, result, title=None, x_label=None, y_label=None,
-                      add_total=False, color_map=None):
-        """Single plot; sum across vehicle types k, one line per category."""
+                      add_total=False, color_map=None, emissions_2007=False):
+        """
+        Single plot; sum across vehicle types k, one line per category.
+        emissions_2007=True adds a right-hand "% of 2007 levels" axis anchored to
+        the 2025 value of the summed total (see add_2007_axis).
+        """
         fig, ax = plt.subplots(figsize=(5, 3.5), dpi=150)
         summed  = self._sum_by_outer(result)
         self.plot_lines(self.T, summed, ax, x_label, y_label, add_total, color_map)
+        if emissions_2007:
+            total = sum(np.asarray(v, dtype=float) for v in summed.values())
+            add_2007_axis(ax, year0_value(total))
         ax.legend(fontsize=8)
         if title:
             fig.suptitle(title)

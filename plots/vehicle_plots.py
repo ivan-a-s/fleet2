@@ -321,7 +321,7 @@ if __name__ == "__main__":
     param_cps = {path: np.float32(0.5) for path, _ in get_uncertainty_distributions(PARAMS)}
     fleet = Fleet(PARAMS, param_cps)
 
-    for k in ['straight']:
+    for k in ['day_cab']:
         age_profiles(fleet, k=k, y=START_YEAR)
         vehicle_mass(fleet, k=k)
         capital_cost(fleet, k=k)

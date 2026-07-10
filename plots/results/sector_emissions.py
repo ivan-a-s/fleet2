@@ -11,11 +11,13 @@ import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, '../..'))   # repo root
+sys.path.insert(0, os.path.join(_HERE, '..'))      # fleet2/plots (plot_utils)
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 from data import START_YEAR
+from plot_utils import add_2007_axis, year0_value
 
 RESULTS_DIR = os.path.join(_HERE, '..', '..', 'results')
 
@@ -39,6 +41,7 @@ SCENARIO_COLORS = {
 
 VEHICLE_TYPES = ['sleeper', 'day_cab', 'straight']
 PLOT_YEARS    = [2030, 2040, 2050]
+PLOT_TARGETS  = [40, 60, 80]   # CleanBC reduction targets below 2007 levels, by year
 
 
 def _box_plot(data, ax, x, edgecolor='black', facecolor='#cce6ff', width=0.6):
@@ -91,7 +94,9 @@ def main():
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.5), sharey=True,
                              constrained_layout=True, dpi=150)
 
-    for ax, year, yi in zip(axes, PLOT_YEARS, year_indices):
+    baseline_2025 = year0_value(_load_sector_emissions('baseline'))
+
+    for i, (ax, year, yi) in enumerate(zip(axes, PLOT_YEARS, year_indices)):
         positions, labels = [], []
 
         for x, (scenario, label) in enumerate(SCENARIOS, start=1):
@@ -108,6 +113,11 @@ def main():
         ax.set_ylim(0, None)
         ax.yaxis.grid(True, linestyle='--', alpha=0.4, zorder=0)
         ax.set_axisbelow(True)
+
+        axp = add_2007_axis(ax, baseline_2025, target_reduction=PLOT_TARGETS[i])
+        if i < len(axes) - 1:
+            axp.set_yticklabels([])
+            axp.set_ylabel(None)
 
     axes[0].set_ylabel(r'Sector Emissions (MtCO$_2$e yr$^{-1}$)')
     fig.suptitle('BC HDT Sector Emissions by Policy Scenario', fontsize=13)

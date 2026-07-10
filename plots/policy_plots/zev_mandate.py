@@ -27,7 +27,7 @@ from model import Fleet, get_uncertainty_distributions, START_YEAR, END_YEAR, ZE
 from data import PARAMS
 from scenarios import SCENARIOS
 from plot_utils import (PT_COLOR, PT_LABELS, K_LABELS, KEY_LABELS,
-                        _colours, _bar_layout, _legend)
+                        _colours, _bar_layout, _legend, add_2007_axis, year0_value)
 
 _YEARS = np.arange(START_YEAR, END_YEAR + 1)
 _ALL_K = list(PARAMS['vehicles']['types'].keys())
@@ -264,6 +264,12 @@ def emissions_comparison(base, mandate, is_mc, k='sleeper'):
                 ax.plot(_YEARS, arr, color=col, linestyle=ls, linewidth=1.5, label=lbl)
 
     ax.set_ylim(0, None)
+    if is_mc:
+        base_total = base[f'emissions_{k}_supply'] / 1e9 + base[f'emissions_{k}_use'] / 1e9
+    else:
+        base_total = (np.asarray(base.emissions[k]['supply'])
+                       + np.asarray(base.emissions[k]['use'])) / 1e9
+    add_2007_axis(ax, year0_value(base_total))
     ax.legend(fontsize=8)
     return fig, ax
 
