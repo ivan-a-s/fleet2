@@ -18,7 +18,6 @@ The simulation proceeds in three layers:
 To do:
  Needs changing later:
  - Uncertainty analysis (reduce params?).
- - HDRD should be in the diesel pool (may become more available as passenger EV market grows).
 
  Nice to have (in order of priority):
  - Fast and slow charge could be merged and have a different way of
@@ -36,6 +35,7 @@ To do:
  - Convervative behavioiur (favour incumbent).
  - Nested logit (all diesel compete together).
  - Simplify params (one motor and then just change the mass with the powertrain etc.)
+ - HDRD proportion may change over time. Make this possible (could be through CI distribution).
 
  Checked up to:
   - _calculate_fuel_consumption
@@ -863,29 +863,38 @@ class Fleet:
             self.policies.apply(v)
         return v
 
-    def _apply_mandate_penalty(self, t, penalty, p_zev, k=None):
+    def _apply_mandate_credit(self, t, credit_price, target, p_zev, k=None):
         """
-        Write ZEV mandate penalty/rebate into annual_cost['zev_mandate'][0] for all
-        year-t vehicles in vehicle type k (or all k if k is None), then recompute NPV.
+        Write ZEV credit value into annual_cost['zev_mandate'][0] for all year-t vehicles
+        in vehicle type k (or all k if k is None), then recompute NPV.
 
-        Non-ZEV powertrains incur `penalty` $/vehicle/yr (at age 0).
-        ZEV powertrains receive a rebate scaled so that total payments balance:
-            rebate = penalty x (1 - p_zev) / max(p_zev, eps)
-        Capped at `penalty` by default; uncapped (revenue-neutral) when
-        mandate.revenue_neutral=True, so all penalties are redistributed to ZEV buyers.
+        Non-ZEVs always owe their own flat share of the target obligation, valued at the
+        market credit_price:
+            c_nonzev = credits_per_vehicle[k] * credit_price * target
+        The government never pays out more than it collects. Total collected from non-ZEVs
+        is the pool = c_nonzev * N_nonzev. ZEVs are paid the same flat market rate for their
+        own credits (credits_per_vehicle[k] * credit_price) if the pool covers it; if ZEV
+        supply is abundant enough that paying everyone in full would exceed the pool,
+        payouts ration down proportionally so total payout never exceeds the pool:
+            ration = min(1, pool / payout_if_full) = min(1, target * p_nonzev / p_zev)
+            c_zev  = credits_per_vehicle[k] * credit_price * ration
+        Net revenue (pool - c_zev * N_zev) is always >= 0: positive when ZEVs are
+        undersupplied relative to target, ~0 once ZEV supply is abundant enough to exhaust
+        the pool.
         """
-        _mandate = self.policies.zev_mandate if self.policies else None
-        _rn = _mandate.revenue_neutral if _mandate else False
-        raw_rebate = penalty * max(1.0 - p_zev, 0.0) / max(p_zev, 1e-9)
-        rebate = raw_rebate if _rn else min(penalty, raw_rebate)
+        _mandate   = self.policies.zev_mandate
+        p_nonzev   = max(1.0 - p_zev, 1e-9)
+        p_zev_safe = max(p_zev, 1e-9)
+        ration     = min(1.0, target * p_nonzev / p_zev_safe)
         for k_ in ([k] if k is not None else self.K):
+            cpv      = _mandate.credits_per_vehicle.get(k_, 0.0)
+            c_nonzev = np.float32(cpv * credit_price * target)
+            c_zev    = np.float32(cpv * credit_price * ration)
             for p in self.P[k_]:
                 if (k_, p, t) not in self.vehicles:
                     continue
                 v = self.vehicles[k_, p, t]
-                v.annual_cost['zev_mandate'][0] = np.float32(
-                    -rebate if p in ZEV_POWERTRAINS else penalty
-                )
+                v.annual_cost['zev_mandate'][0] = -c_zev if p in ZEV_POWERTRAINS else c_nonzev
                 v._calculate_tco_npv()
 
     def _build_initial_stock(self):
@@ -1013,22 +1022,23 @@ class Fleet:
         3. Market share + new purchases: _calculate_market_share() allocates fractions
            across powertrains; then the shortfall between activity_req and activity_met
            by surviving cohorts is filled by new sales split according to those fractions.
-           If a ZEV mandate is active, an outer convergence loop adjusts a penalty/rebate
-           on year-t vehicles until the ZEV share of new sales meets the target (or the
-           30-iteration limit is reached, after which a warning is emitted and the last
-           iterate is used).  Warm-start carries the converged penalty from the previous
-           year to speed convergence.  Oscillation is detected after 5 iterations and
-           dampened via bisection of the step.
+           If a ZEV mandate is active, an outer loop iterates a ZEV credit price and the
+           resulting ZEV sales share against each other (apply price -> new market share ->
+           new share -> new price -> repeat, damped 0.5/0.5) on year-t vehicles until they
+           reach a fixed-point market equilibrium -- economic pressure finding where the
+           market settles, not a search forced to hit the target.  Production-cap-bound
+           years converge the same way (the bracket still narrows: at high enough price
+           the market response saturates below target, and bisection converges to that
+           saturation point rather than target itself).  A warning is only emitted on
+           true numerical non-convergence (30-iteration limit without the bracket
+           narrowing below tolerance) -- solved via bisection on p_zev in [0, 1] rather
+           than a damped linear blend, since credit_price(target, p_zev) is monotonically
+           decreasing and the market's share response to price is monotonically
+           non-decreasing, so their composition minus p_zev is monotonic and has at most
+           one root: robust regardless of how steep the credit-price transition is,
+           with no oscillation-detection heuristics needed.
         """
         mandate = self.policies.zev_mandate if self.policies else None
-
-        # Warm-start: carry last year's converged penalty/ZEV share into next year
-        if mandate and mandate.scope == 'per_k':
-            warm_pen = {k: 0.0 for k in self.K}
-            warm_pzv = {k: 0.0 for k in self.K}
-        else:
-            warm_pen = 0.0
-            warm_pzv = 0.0
 
         for t in self.years:
             # --- Step 0: update revenue_per_tkm from the prior year's realized cost ---
@@ -1064,15 +1074,17 @@ class Fleet:
             # --- Step 3: market share + mandate convergence ---
             if mandate and mandate.scope == 'per_k':
                 for k in self.K:
-                    target   = mandate.target_at(t, k=k)
-                    active   = target > 1e-9
-                    penalty  = warm_pen[k] if active else 0.0
-                    p_zev    = warm_pzv[k]
-                    prev_pen = 0.0
+                    target       = mandate.target_at(t, k=k)
+                    active       = target > 1e-9
+                    lo, hi       = 0.0, 1.0
+                    p_probe      = 0.0
+                    credit_price = 0.0
 
                     for n in range(30 if active else 1):
                         if active:
-                            self._apply_mandate_penalty(t, penalty, p_zev, k=k)
+                            p_probe      = 0.5 * (lo + hi)
+                            credit_price = mandate.credit_price(target, p_probe)
+                            self._apply_mandate_credit(t, credit_price, target, p_probe, k=k)
                         self._calculate_market_share(k, t)
                         activity_met = sum(
                             self.stock.get((k, p, y, t), 0.0)
@@ -1094,44 +1106,37 @@ class Fleet:
                         if not active:
                             break
 
-                        zev_k   = sum(float(self.stock.get((k, p, t, t), 0.0)) for p in self.P[k] if p in ZEV_POWERTRAINS)
-                        total_k = sum(float(self.stock.get((k, p, t, t), 0.0)) for p in self.P[k])
-                        p_zev   = zev_k / max(total_k, 1e-9)
-                        if p_zev >= target - 1e-3:
-                            break
+                        zev_k    = sum(float(self.stock.get((k, p, t, t), 0.0)) for p in self.P[k] if p in ZEV_POWERTRAINS)
+                        total_k  = sum(float(self.stock.get((k, p, t, t), 0.0)) for p in self.P[k])
+                        observed = zev_k / max(total_k, 1e-9)
 
-                        raw     = mandate.penalty_max * (target - p_zev) / max(1.0 - p_zev, 1e-9)
-                        new_pen = min(0.3 * penalty + 0.7 * raw, mandate.penalty_max)
-                        if n >= 5 and (new_pen - penalty) * (penalty - prev_pen) < 0:
-                            new_pen = (penalty + new_pen) * 0.5
-                        prev_pen = penalty
-                        penalty  = new_pen
-                        if abs(penalty - prev_pen) < 1.0:
-                            break  # penalty converged; production cap is binding -- accept best achievable share
+                        if observed > p_probe:
+                            lo = p_probe
+                        else:
+                            hi = p_probe
+                        if hi - lo < 1e-4:
+                            break  # bracket converged -- market equilibrium (production cap binds if p_zev < target)
                     else:
-                        warnings.warn(
-                            f"ZEV mandate (per_k={k!r}) did not converge at year {t}: "
-                            f"p_zev={p_zev:.3f} vs target={target:.3f}, "
-                            f"penalty=${penalty:,.0f}. Penalty oscillating after 30 iterations."
-                        )
-
-                    if active and p_zev > 1e-9:
-                        self._apply_mandate_penalty(t, penalty, p_zev, k=k)
-
-                    warm_pen[k] = penalty if active else 0.0
-                    warm_pzv[k] = p_zev   if active else 0.0
+                        if active:
+                            warnings.warn(
+                                f"ZEV mandate (per_k={k!r}) did not converge at year {t}: "
+                                f"bracket=[{lo:.4f}, {hi:.4f}], target={target:.3f}. "
+                                f"Bisection did not narrow below tolerance after 30 iterations."
+                            )
 
             else:
                 # Fleet-wide convergence (or no mandate)
-                target   = mandate.target_at(t) if mandate else 0.0
-                active   = target > 1e-9
-                penalty  = warm_pen if active else 0.0
-                p_zev    = warm_pzv
-                prev_pen = 0.0
+                target       = mandate.target_at(t) if mandate else 0.0
+                active       = target > 1e-9
+                lo, hi       = 0.0, 1.0
+                p_probe      = 0.0
+                credit_price = 0.0
 
                 for n in range(30 if active else 1):
                     if active:
-                        self._apply_mandate_penalty(t, penalty, p_zev)
+                        p_probe      = 0.5 * (lo + hi)
+                        credit_price = mandate.credit_price(target, p_probe)
+                        self._apply_mandate_credit(t, credit_price, target, p_probe)
 
                     for k in self.K:
                         self._calculate_market_share(k, t)
@@ -1155,37 +1160,28 @@ class Fleet:
                     if not active:
                         break
 
-                    zev_s   = sum(float(self.stock.get((k, p, t, t), 0.0))
-                                  for k in self.K for p in self.P[k] if p in ZEV_POWERTRAINS)
-                    total_s = sum(float(self.stock.get((k, p, t, t), 0.0))
-                                  for k in self.K for p in self.P[k])
-                    p_zev   = zev_s / max(total_s, 1e-9)
-                    if p_zev >= target - 1e-3:
-                        break
+                    zev_s    = sum(float(self.stock.get((k, p, t, t), 0.0))
+                                   for k in self.K for p in self.P[k] if p in ZEV_POWERTRAINS)
+                    total_s  = sum(float(self.stock.get((k, p, t, t), 0.0))
+                                   for k in self.K for p in self.P[k])
+                    observed = zev_s / max(total_s, 1e-9)
 
-                    raw     = mandate.penalty_max * (target - p_zev) / max(1.0 - p_zev, 1e-9)
-                    new_pen = min(0.3 * penalty + 0.7 * raw, mandate.penalty_max)
-                    if n >= 5 and (new_pen - penalty) * (penalty - prev_pen) < 0:
-                        new_pen = (penalty + new_pen) * 0.5
-                    prev_pen = penalty
-                    penalty  = new_pen
-                    if abs(penalty - prev_pen) < 1.0:
-                        break  # penalty converged; production cap is binding -- accept best achievable share
+                    if observed > p_probe:
+                        lo = p_probe
+                    else:
+                        hi = p_probe
+                    if hi - lo < 1e-4:
+                        break  # bracket converged -- market equilibrium (production cap binds if p_zev < target)
                 else:
                     if active:
                         warnings.warn(
                             f"ZEV mandate (fleet) did not converge at year {t}: "
-                            f"p_zev={p_zev:.3f} vs target={target:.3f}, "
-                            f"penalty=${penalty:,.0f}. Penalty oscillating after 30 iterations."
+                            f"bracket=[{lo:.4f}, {hi:.4f}], target={target:.3f}. "
+                            f"Bisection did not narrow below tolerance after 30 iterations."
                         )
 
-                if active and p_zev > 1e-9:
-                    self._apply_mandate_penalty(t, penalty, p_zev)
-
-                warm_pen = penalty if active else 0.0
-                warm_pzv = p_zev   if active else 0.0
                 if mandate:
-                    self.penalty_history[t] = penalty / mandate.penalty_max
+                    self.penalty_history[t] = credit_price / mandate.penalty_max
 
     def _calculate_market_share(self, k, t):
         """

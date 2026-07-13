@@ -31,6 +31,7 @@ powertrains that contain that component, rather than sampled independently.
 | `plots/policy_plots/lcfs.py` | LCFS comparison plots (NPV, sales) |
 | `plots/policy_plots/zev_mandate.py` | ZEV mandate comparison plots (NPV, sales) |
 | `verification/profile_fleet.py` | cProfile script for `Fleet()`; phase table + top-25 by self/cumtime; saves `profile.prof` |
+| `verification/global_sensitivity.py` | SRRC global sensitivity diagnostic from saved `run.py` MC output; rank-regression bar chart per metric/scenario/year |
 | `documentation/build_appendix.py` | Generates `documentation/appendix.md` from `params.py`; run after any parameter change |
 | `documentation/appendix.md` | Auto-generated supplementary material tables (A1–A13) with citations; do not edit by hand |
 
@@ -58,13 +59,18 @@ C:\Users\ivana\anaconda3\python.exe run.py --scenarios baseline carbon_tax lcfs 
 C:\Users\ivana\anaconda3\python.exe run.py --workers 4
 ```
 
-Output lands in `results/<scenario>.npz` (shape `(n_runs, 26)` float32 arrays) and
-`results/<scenario>_meta.json` (n_runs, seed, tol, wall_time_s).  Load with:
+Output lands in `results/<scenario>.npz` (shape `(n_runs, 26)` float32 arrays, plus
+`_mc_cp_samples` — the `(n_runs, n_cols)` array of per-run `cp` draws actually used,
+row-aligned with every other array) and `results/<scenario>_meta.json` (n_runs, seed, tol,
+wall_time_s, `col_labels`, `zero_variance_cols`, `n_cols`).  Load with:
 ```python
 import numpy as np
 d = np.load('results/baseline.npz')
 zev_sleeper = d['zev_stock_sleeper']   # shape (n_runs, 26)
 ```
+
+`verification/global_sensitivity.py` reads these files directly for an SRRC (rank-regression)
+sensitivity diagnostic — see the Monte Carlo architecture section below.
 
 ## Regression snapshot
 
@@ -121,7 +127,7 @@ Vehicles class:     _calculate_mass, _calculate_fuel_consumption,
                     _calculate_capital_cost, _calculate_annual_cost,
                     _discount, _calculate_tco_npv
 
-Fleet class:        _make_vehicle, _apply_mandate_penalty, _build_initial_stock, _run,
+Fleet class:        _make_vehicle, _apply_mandate_credit, _build_initial_stock, _run,
                     _calculate_market_share, _aggregate,
                     select_vehicle_params, realise_uncertainties
 
@@ -134,7 +140,9 @@ Two-phase hook interface called from `Fleet._make_vehicle()`:
 - **`pre_apply(params, k, p, t)`** — modifies the params dict *before* `Vehicles()` is constructed. For physics policies that propagate through mass → FC → cost (e.g. GVWL exemption).
 - **`apply(v)`** — writes cost terms into `v.annual_cost` *after* construction, then calls `v._calculate_tco_npv()` once. For cost-only policies (carbon tax, LCFS).
 
-Endogenous policies (ZEV mandate) run in an outer convergence loop inside `Fleet._run()`, not via the hooks. The loop warm-starts from the previous year's penalty, uses 30/70 damped updates, bisects on oscillation, and exits cleanly when the penalty converges (production cap binding) — only warns on true numerical non-convergence.
+Endogenous policies (ZEV mandate) run in an outer convergence loop inside `Fleet._run()`, not via the hooks. Each vehicle sold is worth `credits_per_vehicle[k]` ZEV credits (default 2.5). `ZEVMandate.credit_price(target, p_zev)` is a smooth logistic function of the compliance gap (~`penalty_max` deep below target, collapsing toward 0 at/above target — no hard cliff). Since `credit_price(target, p_zev)` is monotonically decreasing in `p_zev` and the market's share response to price is monotonically non-decreasing, their composition minus `p_zev` is monotonic with at most one root — so the loop solves for the fixed point via **bisection on `p_zev` in `[0, 1]`** (probe the bracket midpoint, apply the implied price, measure the resulting ZEV share, narrow the bracket by comparison, repeat) rather than a damped linear blend. This is robust to how steep the credit-price transition is (a narrow transition band made a damped-blend version oscillate near the target; bisection doesn't, since it only ever uses the sign of the gap, not its magnitude). The mandate applies economic pressure and the market settles wherever the bracket converges; the loop is **not** a search that stops the instant the target is hit. Production-cap-bound years converge the same way (the bracket still narrows, just to a `p_zev` below target) — this is not a special case. Only warns on true numerical non-convergence (30-iteration limit without the bracket narrowing below `1e-4`). No cross-year warm-start (each year bisects the full `[0, 1]` range from scratch, ~14 iterations to converge) — this matches Paper 1 (`old/model_old.py:885-915`, which also resets its penalty search fresh every year) more closely than fleet2's previous warm-started version did. Paper 1's mechanism is a hinge-clamped linear formula with the same "only exit is the search variable stabilizing" property; this replaces the hinge with a smooth logistic and per-vehicle credits in place of a flat $/vehicle penalty.
+
+`Fleet._apply_mandate_credit(t, credit_price, target, p_zev, k=None)` writes the actual dollar amounts and is bounded so the government never pays out more than it collects. Non-ZEVs always owe a flat `credits_per_vehicle[k] * credit_price * target` (their own share of the obligation, independent of population split). The total collected from non-ZEVs is a pool; ZEVs are paid the flat market rate for their own credits (`credits_per_vehicle[k] * credit_price`) if the pool covers it, otherwise payouts ration down proportionally (`min(1, target * p_nonzev / p_zev)`) so total payout never exceeds the pool. Net revenue is always `>= 0` — positive when ZEV supply is undersized relative to target, `~0` once ZEV supply is abundant enough to exhaust the pool.
 
 `COST_CATEGORIES` in `model.py` drives `_aggregate()`:
 ```python
@@ -149,6 +157,11 @@ COST_CATEGORIES = {
 **ZEV mandate scopes:**
 - `scope='fleet'` — ZEV share target applies across all k combined; `targets = {year_str: fraction}`
 - `scope='per_k'` — independent target per vehicle type; `targets = {k: {year_str: fraction}}`
+
+`credits_per_vehicle` (default `{'sleeper': 2.5, 'day_cab': 2.5, 'straight': 2.5}`) and
+`transition_width` (default `0.02`, i.e. credit price is ~95%/~5% of `penalty_max` at a
+2-percentage-point deficit/surplus) are constructor kwargs on `ZEVMandate`, set per scenario
+in `scenarios.py` like `targets`/`penalty`/`scope` — not calibrated params.py values.
 
 ## Key params.py fields to know
 
@@ -226,6 +239,26 @@ cancelled (already in-flight workers finish naturally).
 | `emissions_{k}_{embodied\|supply\|use}` | (n, 26) | Fleet emissions (kgCO2e/yr) |
 | `system_costs_{k}_{category}` | (n, 26) | Annual costs ($/yr) |
 | `fuel_usage_{k}_{f}` | (n, 26) | Fuel consumed (L, kg, or kWh/yr) |
+
+Plus one extra array, `_mc_cp_samples` (n, n_cols) — the raw `cp` draw used for each surviving
+run in each sample-matrix column, row-aligned with all series above via the same `iRun` order
+`run_scenario()` accumulates results in. `_meta.json` carries the matching `col_labels` (one
+label per column — the `group` name if grouped, else the dotted `params.py` leaf path) and
+`zero_variance_cols` (column indices where every mapped leaf is invariant to `cp` — e.g.
+`interp`/`const` anchors that are bare values rather than distributions — so they can be
+excluded from a sensitivity regression rather than plotted as meaningless near-zero bars).
+
+**Global sensitivity (`verification/global_sensitivity.py`):** a pure post-hoc reader of the
+above — no `Fleet`/`ProcessPoolExecutor` dependency. Computes Standardized Rank Regression
+Coefficients (SRRC): rank-transform `_mc_cp_samples` and a chosen scalar output metric
+(`emissions_total`, `zev_share`, or `system_cost_total`, evaluated at `--year`), standardize,
+fit OLS; each input's squared coefficient approximates its share of output variance, and the
+regression's own rank-R^2 flags whether that decomposition is trustworthy (SRRC only sees
+monotonic marginal effects, not interactions — the ZEV-mandate bisection loop and
+production-cap kinks are the likely source of any low R^2). This is an approximate,
+cheap-to-run diagnostic for day-to-day development; a full Sobol'/Saltelli variance
+decomposition (needs its own A/B/AB sampling design, not the plain random draws here) is
+planned separately for pre-publication use and is not implemented.
 
 **Scenarios** (`scenarios.py`): `baseline`, `carbon_tax`, `lcfs`, `zev_mandate`, `gvwl`,
 `full_policy`. Policy numeric values (tax schedules, LCFS targets, ZEV mandate fractions) all

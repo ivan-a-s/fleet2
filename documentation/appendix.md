@@ -33,7 +33,7 @@ Source: National Research Council, 2010; NRCan, 2025; Statistics Canada, 2009
 
 | Fuel | Unit | LHV (MJ/unit) | Supply GHG (kgCO2e/unit) | Use GHG (kgCO2e/unit) | Refuel eff. | Water use (L/unit) | Elec. use (kWh/unit) | Source |
 |---|---|---|---|---|---|---|---|---|
-| Diesel | L | 38.6 | 0.88 | 2.52 | 1.0 | 2.95 | 0.1 | S&T Squared, 2025; M. Wang et al., 2024 |
+| Diesel | L | 38.6 | 1.1036 | 1.7489 | 1.0 | 2.95 | 0.1 | S&T Squared, 2025; M. Wang et al., 2024 |
 | Electricity (slow charge) | kWh | 3.6 | 0.0099 | 0.0 | 0.95 | 1.43 - 1.88 | 1.0 | Government of B.C., 2025a; M. Wang et al., 2024 |
 | Electricity (fast charge) | kWh | 3.6 | 0.0099 | 0.0 | 0.86 | 1.43 - 1.88 | 1.0 | Government of B.C., 2025a; M. Wang et al., 2024 |
 | Hydrogen (electrolysis) | kg | 120.0 | 0.57 | 0.0 | 1.0 | 95.6 - 121.4 | 55.0 | A. Franco et al., 2023; IRENA and Bluerisk, 2023 |

@@ -45,23 +45,6 @@ SCENARIOS = {
         ),
     ),
 
-    'zev_mandate_100k': Policies(
-        zev_mandate=ZEVMandate(
-            targets={'2025': 0, '2030': 0.3, '2040': 1.0, '2050': 1.0},
-            penalty=100_000,
-            scope='fleet',
-        ),
-    ),
-
-    'zev_mandate_100k_rn': Policies(
-        zev_mandate=ZEVMandate(
-            targets={'2025': 0, '2030': 0.3, '2040': 1.0, '2050': 1.0},
-            penalty=100_000,
-            scope='fleet',
-            revenue_neutral=True,
-        ),
-    ),
-
     'gvwl': Policies(
         gvwl_exemption=GVWLExemption(),
     ),

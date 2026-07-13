@@ -33,7 +33,7 @@ _YEARS = np.arange(START_YEAR, END_YEAR + 1)
 _ALL_K = list(PARAMS['vehicles']['types'].keys())
 _ALL_P = {k: list(PARAMS['vehicles']['types'][k]['powertrains'].keys()) for k in _ALL_K}
 
-_MANDATE_SCENARIO = 'zev_mandate_100k_rn'   # default scenario shown in plots
+_MANDATE_SCENARIO = 'zev_mandate'   # default scenario shown in plots
 
 
 # ---------------------------------------------------------------------------
@@ -51,17 +51,13 @@ def load_data(results_dir=None):
     root = Path(_HERE).parent.parent
     rdir = Path(results_dir) if results_dir else root / 'results'
     base_path = rdir / 'baseline.npz'
-    if base_path.exists():
-        for name in (_MANDATE_SCENARIO, 'zev_mandate'):
-            mandate_path = rdir / f'{name}.npz'
-            if mandate_path.exists():
-                if name != _MANDATE_SCENARIO:
-                    warnings.warn(f'{_MANDATE_SCENARIO}.npz not found; using {name}.npz')
-                return np.load(base_path), np.load(mandate_path), True
+    mandate_path = rdir / f'{_MANDATE_SCENARIO}.npz'
+    if base_path.exists() and mandate_path.exists():
+        return np.load(base_path), np.load(mandate_path), True
     warnings.warn(f'MC results not found at {rdir}; falling back to single deterministic run.')
     inputs    = dict(get_uncertainty_distributions(PARAMS))
     param_cps = {k: 0.5 for k in inputs}
-    scen      = SCENARIOS.get(_MANDATE_SCENARIO, SCENARIOS['zev_mandate'])
+    scen      = SCENARIOS[_MANDATE_SCENARIO]
     base      = Fleet(PARAMS, param_cps)
     mandate   = Fleet(PARAMS, param_cps, policies=scen)
     return base, mandate, False

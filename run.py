@@ -31,8 +31,13 @@ If --max-runs is reached before convergence the run completes anyway; a warning 
 
 Output
 ------
-results/<scenario>.npz      -- dict of (n_runs, 26) float32 arrays, one per output series
-results/<scenario>_meta.json -- n_runs, seed, tol, wall_time_s
+results/<scenario>.npz      -- dict of (n_runs, 26) float32 arrays, one per output series,
+                                plus _mc_cp_samples: (n_runs, n_cols) float32 array of the
+                                per-run cp draws actually used, row-aligned with every other
+                                array (for verification/global_sensitivity.py)
+results/<scenario>_meta.json -- n_runs, seed, tol, wall_time_s, col_labels (one label per
+                                _mc_cp_samples column), zero_variance_cols (column indices
+                                that never move the model output), n_cols
 """
 import argparse
 import json
@@ -44,7 +49,7 @@ import numpy as np
 from scipy.stats import ks_2samp
 
 from data import PARAMS, START_YEAR, END_YEAR
-from model import Fleet, get_uncertainty_distributions, ZEV_POWERTRAINS
+from model import Fleet, get_uncertainty_distributions, set_param, ZEV_POWERTRAINS
 from scenarios import SCENARIOS
 
 # --- constants ---------------------------------------------------------------
@@ -90,6 +95,34 @@ def _build_col_map(params):
     return col_map, n_cols
 
 
+def _col_labels(distributions, col_map: dict, n_cols: int) -> list[str]:
+    """One label per sample-matrix column: the group name if grouped, else the
+    dotted parameter path for the single leaf mapped to that column."""
+    labels = [None] * n_cols
+    for path, group in distributions:
+        col = col_map[path]
+        labels[col] = group if group is not None else '.'.join(path)
+    return labels
+
+
+def _zero_variance_cols(distributions, col_map: dict, params) -> set[int]:
+    """Columns where every mapped leaf is unaffected by cp (e.g. 'interp' anchors
+    that are bare floats).  Checking cp=0 vs cp=1 is sufficient because every
+    set_param/set_param_ transform in this codebase is a monotonic PPF of cp.
+    A grouped column is excluded only if ALL its leaves are invariant -- if any
+    one leaf in the group moves with cp, the column has a real effect."""
+    zero_var = {col for col in col_map.values()}
+    for path, _ in distributions:
+        leaf = params
+        for k in path:
+            leaf = leaf[k]
+        lo = set_param(leaf, cp=0.0)
+        hi = set_param(leaf, cp=1.0)
+        if not np.array_equal(lo, hi):
+            zero_var.discard(col_map[path])
+    return zero_var
+
+
 # --- worker ------------------------------------------------------------------
 
 def _one_run(args):
@@ -97,7 +130,7 @@ def _one_run(args):
     iRun, samples_row, col_map, policies = args
     param_cps = {path: np.float32(samples_row[col]) for path, col in col_map.items()}
     fleet = Fleet(PARAMS, param_cps, policies=policies)
-    return _extract(fleet)
+    return iRun, _extract(fleet)
 
 
 def _extract(fleet):
@@ -224,25 +257,30 @@ def _time_one_run(col_map: dict, policies) -> float:
 
 def run_scenario(scenario_name: str, policies, all_samples: np.ndarray,
                  col_map: dict, n_workers: int, tol: float,
-                 check_every: int, per_run_s: float) -> tuple[dict, int, float]:
+                 check_every: int, per_run_s: float) -> tuple[dict, int, float, list]:
     K = list(PARAMS['vehicles']['types'].keys())
     convergence_keys = _make_convergence_keys(K)
 
     n_max = len(all_samples)
     args  = [(i, all_samples[i], col_map, policies) for i in range(n_max)]
     accumulated: list[dict] = []
+    iRuns: list[int] = []
     converged   = False
     t0          = time.perf_counter()
 
     if n_max < PARALLEL_THRESHOLD:
         for a in args:
-            accumulated.append(_one_run(a))
+            iRun, res = _one_run(a)
+            iRuns.append(iRun)
+            accumulated.append(res)
     else:
         with ProcessPoolExecutor(max_workers=n_workers) as ex:
             futures = [ex.submit(_one_run, a) for a in args]
             done_count = 0
             for fut in as_completed(futures):
-                accumulated.append(fut.result())
+                iRun, res = fut.result()
+                iRuns.append(iRun)
+                accumulated.append(res)
                 done_count += 1
                 if done_count >= 200 and done_count % check_every == 0:
                     # need even count so both halves are equal size
@@ -263,7 +301,7 @@ def run_scenario(scenario_name: str, policies, all_samples: np.ndarray,
     if not converged and n_max >= PARALLEL_THRESHOLD:
         print(f'  Warning: convergence not reached at tol={tol}; increase --max-runs or relax --tol')
 
-    return _merge(accumulated), n_conv, wall
+    return _merge(accumulated), n_conv, wall, iRuns
 
 
 # --- entry point -------------------------------------------------------------
@@ -273,6 +311,12 @@ def main(args):
 
     col_map, n_cols = _build_col_map(PARAMS)
     print(f'Uncertainty parameters: {len(col_map)} paths, {n_cols} independent draws\n')
+
+    # Column metadata for downstream sensitivity analysis (verification/global_sensitivity.py):
+    # labels and zero-variance flags depend only on params.py, not on scenario/policies.
+    distributions  = get_uncertainty_distributions(PARAMS)
+    col_labels     = _col_labels(distributions, col_map, n_cols)
+    zero_var_cols  = _zero_variance_cols(distributions, col_map, PARAMS)
 
     # Time a single run so the speedup report uses the actual machine speed.
     first_scenario = args.scenarios[0]
@@ -290,7 +334,7 @@ def main(args):
             continue
         policies = SCENARIOS[scenario_name]
 
-        merged, n_conv, wall = run_scenario(
+        merged, n_conv, wall, iRuns = run_scenario(
             scenario_name, policies, all_samples, col_map,
             n_workers   = args.workers,
             tol         = args.tol,
@@ -298,15 +342,19 @@ def main(args):
             per_run_s   = per_run_s,
         )
 
+        used_cp  = all_samples[iRuns].astype(np.float32)
         out_path = Path('results') / f'{scenario_name}.npz'
-        np.savez_compressed(out_path, **merged)
+        np.savez_compressed(out_path, **merged, _mc_cp_samples=used_cp)
 
         meta = {
-            'scenario':    scenario_name,
-            'n_runs':      n_conv,
-            'seed':        args.seed,
-            'tol':         args.tol,
-            'wall_time_s': round(wall, 2),
+            'scenario':          scenario_name,
+            'n_runs':            n_conv,
+            'seed':              args.seed,
+            'tol':               args.tol,
+            'wall_time_s':       round(wall, 2),
+            'col_labels':        col_labels,
+            'zero_variance_cols': sorted(zero_var_cols),
+            'n_cols':            n_cols,
         }
         with open(Path('results') / f'{scenario_name}_meta.json', 'w') as f:
             json.dump(meta, f, indent=2)

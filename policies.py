@@ -117,23 +117,51 @@ class LCFS:
 
 class ZEVMandate:
     """
-    Endogenous ZEV sales mandate enforced via a per-year convergence loop in Fleet._run().
+    Endogenous ZEV credit market enforced via a per-year bisection convergence loop in
+    Fleet._run().  Each vehicle sold is worth `credits_per_vehicle[k]` ZEV credits.  A
+    credit's market price (see `credit_price()`) is a smooth (logistic) function of the
+    current compliance gap `target - p_zev` -- ~penalty_max when deep below target,
+    collapsing toward 0 once at/above target.
 
-    When the ZEV share of new sales falls below target[t], non-ZEV vehicles incur a penalty
-    and ZEV vehicles receive a rebate.  Fleet._run() iterates until the ZEV share meets the
-    target (or the iteration limit is reached).
+    The government never pays out more than it collects.  Non-ZEVs always owe their own
+    flat share of the target obligation: `c_nonzev = credits_per_vehicle[k] * credit_price
+    * target` (see `Fleet._apply_mandate_credit`).  The total collected from non-ZEVs is a
+    pool; ZEVs are paid the same flat market rate for their own credits if the pool covers
+    it, otherwise payouts ration down proportionally so total payout never exceeds the pool.
+    Net revenue is always >= 0: positive when ZEV supply is undersized relative to target
+    (the government collects non-compliance fees it can't fully redistribute), ~0 once ZEV
+    supply is abundant enough to exhaust the pool.
 
-    targets : {year_str: fraction}                      for scope='fleet'
-              {k: {year_str: fraction}}                 for scope='per_k'
-    penalty : maximum $/vehicle annual penalty/rebate
-    scope   : 'fleet' (aggregate ZEV share across all k) or 'per_k' (independent per type)
+    credit_price(target, p_zev) is monotonically decreasing in p_zev, and the market's share
+    response to price is monotonically non-decreasing, so their composition minus p_zev is
+    monotonic with at most one root.  Fleet._run() finds it via bisection on p_zev in [0, 1]
+    (probe the bracket midpoint, apply the implied price, measure the resulting ZEV share,
+    narrow the bracket, repeat) rather than a damped linear blend -- robust regardless of how
+    steep the credit-price transition is, with no oscillation-detection heuristics needed.
+    The mandate applies economic pressure and the market settles wherever the bracket
+    converges; it is not a search that stops the instant target is crossed.  Production-cap-
+    bound scenarios fall out of the same convergence check naturally (the bracket still
+    narrows, just to a p_zev below target), with no special-casing needed.
+
+    targets             : {year_str: fraction}              for scope='fleet'
+                          {k: {year_str: fraction}}         for scope='per_k'
+    penalty             : maximum $/credit annual credit price
+    scope               : 'fleet' (aggregate ZEV share across all k) or 'per_k' (independent per type)
+    credits_per_vehicle : {k: credits/vehicle}, default 2.5 for every k -- value of one
+                          vehicle's worth of ZEV credits at the market credit_price
+    transition_width    : fraction of ZEV share (default 0.02 = 2 percentage points) over which
+                          credit_price transitions from ~95% to ~5% of penalty_max around target
     """
 
+    _DEFAULT_CREDITS_PER_VEHICLE = {'sleeper': 2.5, 'day_cab': 2.5, 'straight': 2.5}
+
     def __init__(self, targets: dict, penalty: float, scope: str = 'fleet',
-                 revenue_neutral: bool = False):
-        self.scope           = scope
-        self.penalty_max     = float(penalty)
-        self.revenue_neutral = revenue_neutral
+                 credits_per_vehicle: dict = None, transition_width: float = 0.02):
+        self.scope               = scope
+        self.penalty_max         = float(penalty)
+        self.credits_per_vehicle = (dict(credits_per_vehicle) if credits_per_vehicle is not None
+                                     else dict(self._DEFAULT_CREDITS_PER_VEHICLE))
+        self._logistic_k         = float(np.log(19) / transition_width)
         years            = np.arange(_YEAR0, END_YEAR + 1)
 
         if scope == 'per_k':
@@ -162,6 +190,10 @@ class ZEVMandate:
             arr = self._target_arr.get(k)
             return float(arr[idx]) if arr is not None and 0 <= idx < len(arr) else 0.0
         return float(self._target_arr[idx]) if 0 <= idx < len(self._target_arr) else 0.0
+
+    def credit_price(self, target: float, p_zev: float) -> float:
+        """Logistic credit price: ~penalty_max when p_zev << target, ~0 when p_zev >= target."""
+        return self.penalty_max / (1.0 + np.exp(self._logistic_k * (p_zev - target)))
 
 
 class Policies:
