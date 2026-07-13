@@ -82,7 +82,7 @@ After changes, run:
 ```
 C:\Users\ivana\anaconda3\python.exe verification/snapshot.py check
 ```
-This compares 2210 fleet output values and reports any that shifted by more than 0.01%. If outputs change unexpectedly, investigate before proceeding. `verification/snapshot.npz` is the saved baseline — overwrite it intentionally when a change is deliberate.
+This compares 2236 fleet output values and reports any that shifted by more than 0.01%. If outputs change unexpectedly, investigate before proceeding. `verification/snapshot.npz` is the saved baseline — overwrite it intentionally when a change is deliberate.
 
 ## Conventions
 
@@ -100,7 +100,7 @@ This compares 2210 fleet output values and reports any that shifted by more than
 - [x] `Vehicles` class — complete: mass, fuel consumption (FASTSim surrogate), range, annual_distance, FC replacements, emissions, capital_cost, annual_cost, TCO, NPV
 - [x] `Fleet._build_initial_stock()` — complete: pre-2025 diesel cohorts sized to match activity requirement
 - [x] `Fleet._run()` — complete: year-by-year roll-over, vehicle creation, market share, new purchases
-- [x] `Fleet._calculate_market_share()` — complete: multinomial logit + iterative production cap
+- [x] `Fleet._calculate_market_share()` — complete: flat multinomial logit + production caps enforced via shadow pricing (see "Market-share allocation architecture" below); nested logit is the next step, not yet started
 - [x] `Fleet._aggregate()` — complete: total_stock, sales, fuel_usage, emissions, system_costs
 - [x] `plots/vehicle_plots.py` — per-cohort sanity checks; `plots/fleet_plots.py` — fleet-level line plots
 - [x] `policies.py` — `CarbonTax`, `GVWLExemption`, `LCFS`, `ZEVMandate`, `Policies` container; comparison plots in `plots/policy_plots/`
@@ -130,9 +130,95 @@ Vehicles class:     _calculate_mass, _calculate_fuel_consumption,
 Fleet class:        _make_vehicle, _apply_mandate_credit, _build_initial_stock, _run,
                     _calculate_market_share, _aggregate,
                     select_vehicle_params, realise_uncertainties
+                    (self._mu_warm_start: (k, p) -> float, persists shadow costs across
+                    _calculate_market_share calls -- see "Market-share allocation
+                    architecture" below)
 
-Module function:    _market_share_limit (production cap helper)
+Module functions:   _market_share_limit (production cap helper, unchanged),
+                    _shadow_price_shares (shadow-price solver -- see below)
 ```
+
+## Market-share allocation architecture (`Fleet._calculate_market_share`, `_shadow_price_shares`)
+
+**Status: flat logit + shadow pricing is done and verified. Nested logit is the next step (not started).**
+
+Utility for powertrain `p` is `price_lambda * NPV(p)` (higher NPV = more desirable; `price_lambda`
+is positive, `params.py: fleet.price_lambda`). Production caps (`_market_share_limit()`, unchanged
+from before — ratchets a share cap off last year's own share via `init_market_limit` /
+`cagr_nacent` / `cagr_mature`) used to be enforced by **clipping**: run the flat logit, pin any
+powertrain that exceeds its cap at the cap value, remove it, and re-run the logit over the
+survivors, repeating until nothing new binds (≤10 passes). This was replaced with **shadow
+pricing**: a shadow cost `mu_p >= 0` is solved for every powertrain so that `V_p = price_lambda *
+(NPV(p) - mu_p)` enters the *same* softmax as everyone else (nobody is ever removed from the
+choice set), with complementary slackness — `mu_p > 0` only where the cap binds exactly. Under a
+single flat logit the two mechanisms are provably equivalent (IIA: a third powertrain's relative
+odds against the others don't depend on *how* a capped powertrain's excess demand is discouraged,
+only on the share it ends up with) — confirmed by an exact match (2236/2236 values within 0.01%)
+against the pre-shadow-pricing snapshot. They will **not** stay equivalent once nested logit is
+added (see "Next steps") — that's the actual reason shadow pricing exists at all; a capped leaf
+that's *removed* rather than *discounted* leaks a wrong (inflated) inclusive value up through its
+nest, distorting every sibling nest's share. That distortion is largest exactly when several
+members of the same nest are simultaneously and severely capped — i.e. nascent ZEV/H2 technology
+in the early simulation years, the part of the trajectory the whole model exists to get right.
+
+**Solver (`_shadow_price_shares`, `model.py`):** Gauss-Seidel sweeps — one powertrain's `mu` at a
+time, by **bisection**, holding every other powertrain's `mu` fixed at its current value, cycling
+through all powertrains repeatedly. Bisection (not a joint Newton/multiplicative fixed-point step)
+was chosen because `share_p(mu_p)`, holding everything else fixed, is strictly monotonically
+decreasing — bisection can't overshoot regardless of how close a share is to saturating at 0 or 1.
+An earlier joint-Newton version overshot badly and oscillated once several powertrains were
+simultaneously and severely capped (residual pinned at a large constant, never shrinking) — the
+same lesson this codebase already learned once for the ZEV-mandate credit-price search (bisection
+over a damped blend, `policies.py`/`Fleet._run`, because a damped blend oscillated on a steep
+transition there too).
+
+**A real bug worth remembering if this solver is touched again:** the convergence check must
+verify full complementary slackness, not just feasibility. Checking only `share_p <= cap_p` is not
+enough — with a warm-started `mu` (see below), an early powertrain in the sweep order can be
+judged against *other* powertrains' stale, not-yet-updated values and pick up an unwarranted
+`mu > 0`; once those others are corrected later in the same sweep, the wrongly-capped one's share
+settles comfortably *under* its own cap, which passes a feasibility-only check even though it
+should have relaxed back to `mu == 0`. This produced answers up to ~99% wrong in one real (k, t)
+case before being caught by the snapshot check. The fix: for every powertrain with `mu > 0`,
+require `share_p == cap_p` (not just `<=`), which forces another sweep instead of accepting that
+self-consistent-but-wrong state. Trust the snapshot check over "no warnings raised" when validating
+any future change here — the buggy version also produced *zero* convergence warnings.
+
+**Warm-starting:** `Fleet._mu_warm_start` (keyed `(k, p)`) persists each powertrain's converged
+shadow cost across calls — both across the ZEV-mandate bisection's ~30 calls/year (which only
+shift NPV slightly as the credit price changes) and across years. This changes nothing about the
+converged answer (still verified against the snapshot), only how many sweeps it takes to reach it.
+
+**Performance** (`Fleet(PARAMS, param_cps, policies=...)`, cp=0.5, vs. the pre-shadow-pricing
+waterfall): baseline/carbon_tax/lcfs/gvwl ~1.0–1.3 s (1.6–2.2× the old ~0.6 s), zev_mandate ~4 s
+(3.7×), full_policy (all four policies stacked, the worst case) ~10.6 s (9.7×, up from ~1.1 s).
+Still fine for Monte Carlo given policy scenarios also need fewer runs to converge, but worth
+knowing before assuming a `run.py` pass will take the same wall-clock time it used to.
+
+**For the nested-logit step:** the outer Gauss-Seidel/bisection/warm-start machinery is expected
+to carry over unchanged — per-leaf bisection only requires `share_of(idx, mu_p)` to be
+monotonically decreasing in `mu_p` holding everything else fixed, which holds equally whether
+`shares_at()` is a flat softmax or a nested-logit tree evaluated bottom-up (utility) then top-down
+(probability). The plan is to swap out `shares_at()`'s internals for the tree evaluator rather
+than design a new solver. Agreed tree (dhice placed in Hydrogen — it's a 75%-diesel/25%-H2
+dual-fuel ICE, but grouped with FC/HICE by ZEV-adjacent substitution pattern, not by fuel share):
+
+```
+Liquid (lambda=0.7)
+  Conventional (lambda=0.4): dice, he
+  phe
+Hydrogen (lambda=0.6): fc, hice, dhice
+Electric (lambda=1.0): be
+```
+
+Lambda values are not yet in `params.py` (they'd go in `fleet.nest_lambdas`, parallel to
+`price_lambda`, as plain `P(value, src="UNREF -- assumption")` scalars — mechanically transparent
+through `data.py`, no special handling needed). An earlier planning pass for a nesting-first
+(waterfall-unchanged) version produced a plan file
+(`C:\Users\ivana\.claude\plans\go-ahead-and-make-bubbly-ocean.md`) — **that plan is now stale**:
+it assumed nesting would sit on top of the old clipping mechanism, but shadow pricing has replaced
+that mechanism entirely. Nesting needs to be layered onto the shadow-pricing solver described
+above instead.
 
 ## Policy architecture (`policies.py`)
 
@@ -183,14 +269,24 @@ in `scenarios.py` like `targets`/`penalty`/`scope` — not calibrated params.py 
 
 ## Next steps
 
-1. Check total mass plausibility — sleeper diesel showing 28.9 t loaded (expect ~36-40 t)
-2. Verify `model.py` checked up to `_calculate_fuel_consumption` — remaining methods still need review
-3. Stage 4 policy improvements: dynamic LCFS credit pricing, ZEV purchase rebate, joint mandate+LCFS convergence (see `POLICY_PLAN.md`)
+1. **Nested logit** (next session) — replace the flat softmax inside `_shadow_price_shares`
+   with the agreed tree (see "Market-share allocation architecture" above); reuse the existing
+   Gauss-Seidel/bisection/warm-start solver rather than writing a new one. Add `fleet.nest_lambdas`
+   to `params.py`. Verify with `verification/test_limits.py` (some tests encode flat-MNL-specific
+   expected values — e.g. equal-NPV-gives-uniform-1/N — that won't hold once nests have unequal
+   cardinality; that's an expected, correct nested-logit property, not a bug) and expect the
+   snapshot to genuinely shift this time (re-save intentionally once verified).
+2. Check total mass plausibility — sleeper diesel showing 28.9 t loaded (expect ~36-40 t)
+3. Verify `model.py` checked up to `_calculate_fuel_consumption` — remaining methods still need review
+4. Stage 4 policy improvements: dynamic LCFS credit pricing, ZEV purchase rebate, joint mandate+LCFS convergence (see `POLICY_PLAN.md`)
 
 ## Performance notes
 
-Single `Fleet()` run takes ~0.5–0.9 s depending on machine and policies active. The dominant cost
-is constructing 543 `Vehicles` objects in `_run()` — inherent physics, not easily vectorised.
+Single `Fleet()` run takes ~0.6–1.3 s for baseline/carbon_tax/lcfs/gvwl, ~4 s for zev_mandate, and
+~10–11 s for full_policy (all four policies stacked) — see "Market-share allocation architecture"
+above for why policy scenarios with an active ZEV mandate got slower after shadow pricing replaced
+clipping, and how much. The dominant cost for scenarios without an active mandate is still
+constructing 543 `Vehicles` objects in `_run()` — inherent physics, not easily vectorised.
 Further optimisation opportunities (ZEV mandate loop, `activity_met` vectorisation) are documented
 in the `verification/profile_fleet.py` docstring under "Remaining optimisation opportunities".
 

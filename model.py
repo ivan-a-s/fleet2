@@ -22,9 +22,7 @@ To do:
 
  Nice to have (in order of priority):
  - Add a resource-haul vehicle type.
- - Size vehicle components for NPV optimisation?
  - Scale factors to relate cost to scale somehow.
- - Altitude on FC/engine performance and air resistance.
  - Variance in use (logit change like NREL).
  - Make scrappage/usage decisions for vehicles?
  - Hotel load for sleepers and fridge units?
@@ -798,6 +796,135 @@ def _market_share_limit(prev_share, init, cagr_nacent, cagr_mature, threshold=0.
     return prev_share * (1 + cagr_mature) / (1 + GROWTH_RATE)
 
 
+def _shadow_price_shares(npv, caps, price_lambda, mu0=None, max_sweeps=200, max_bisect=40, tol=1e-7):
+    """
+    Solve for a shadow cost mu_p >= 0 per powertrain p such that the resulting flat-logit
+    share of p never exceeds caps[p], with complementary slackness (mu_p > 0 only where the
+    cap binds exactly): mu_p >= 0, share_p(mu) <= caps[p], mu_p * (caps[p] - share_p(mu)) == 0.
+
+    Replaces post-hoc clipping: a capped powertrain stays in the choice set at a discounted
+    utility (price_lambda * (npv_p - mu_p)) instead of being removed with its excess demand
+    redistributed among the survivors. Under a single flat logit (no nesting), these two
+    mechanisms are provably equivalent -- IIA means the relative odds between any two
+    uncapped powertrains never depend on how a third powertrain's excess demand is
+    discouraged, only on the share it ends up with.
+
+    Solved via Gauss-Seidel sweeps: one powertrain's shadow cost at a time, by bisection,
+    holding every other powertrain's shadow cost fixed at its current value, cycling through
+    all powertrains repeatedly until complementary slackness holds everywhere to within a
+    relative tolerance of tol -- every uncapped (mu == 0) leaf's share must not exceed its
+    cap, and every capped (mu > 0) leaf's share must equal its cap, not merely stay under it.
+    Checking only feasibility (share <= cap) is not enough: with a warm-started mu (see below),
+    an early leaf in the sweep order can be judged against OTHER leaves' still-stale values and
+    end up with an unwarranted mu > 0; once those other leaves are corrected later in the same
+    sweep, the wrongly-capped leaf's share settles comfortably under its own cap, which looks
+    feasible even though it should have relaxed back to mu == 0. Checking tightness for every
+    currently-capped leaf, not just feasibility, forces another sweep instead of accepting that
+    inconsistent state (an earlier version of this function checked feasibility only and could
+    converge to exactly this kind of self-consistent-but-wrong point after a bad warm start).
+    Bisection on a single
+    coordinate (all else fixed) is used rather than a joint multi-dimensional Newton/fixed-
+    point step, because share_p(mu_p), holding everything else fixed, is strictly
+    monotonically decreasing in mu_p -- bisection can never overshoot or oscillate regardless
+    of how close a share is to saturating at 0 or 1. (A joint Newton step, by contrast, uses
+    the local slope to extrapolate a step and badly overshoots once a share is near-saturated;
+    when several powertrains in the same call are simultaneously and severely capped -- e.g.
+    every nascent ZEV powertrain at once in an early year under a strong policy scenario --
+    this caused a genuine oscillation, not just slow convergence, in an earlier version of
+    this function.) This mirrors the ZEV-mandate credit-price search in Fleet._run, which
+    bisects for the same reason: a monotonic sign-only search, not a magnitude-based step, is
+    what makes it robust to how steep or saturated the underlying curve is.
+
+    A cap of exactly 0 has no finite mu that achieves it -- handled by permanently excluding
+    that powertrain from the choice set for this call. A single remaining (non-zero-cap)
+    powertrain has no lever either: with nothing left to redistribute demand to, its share is
+    mechanically 1 regardless of its own cap, so bisection is skipped entirely in both cases.
+
+    npv, caps: dict powertrain -> value, same keys. mu0: optional dict powertrain -> initial
+    shadow cost, e.g. the converged result from a previous call with slightly different npv
+    (the ZEV-mandate credit-price bisection in Fleet._run calls this ~30 times per year with
+    only a small shift in npv each time as the credit price changes, so warm-starting from
+    the last converged mu turns most sweeps into a 0-1 iteration confirmation instead of a
+    search from scratch -- this changes nothing about the answer, since the fixed point
+    solved for doesn't depend on the starting guess, only how many sweeps it takes to reach
+    it). Returns (shares, mu): dict powertrain -> final share (sums to 1), and dict
+    powertrain -> converged shadow cost (for warm-starting a subsequent call).
+    """
+    powertrains = list(npv)
+    npv_arr  = np.array([npv[p] for p in powertrains])
+    cap_arr  = np.array([caps[p] for p in powertrains])
+    zero_cap = cap_arr <= 0.0
+    if mu0 is None:
+        mu = np.zeros(len(powertrains))
+    else:
+        mu = np.array([max(0.0, mu0.get(p, 0.0)) for p in powertrains])
+        mu[zero_cap] = 0.0
+
+    def shares_at(mu_vec):
+        v = price_lambda * (npv_arr - mu_vec)
+        v = v - v.max()
+        exp_v = np.exp(v)
+        exp_v[zero_cap] = 0.0
+        return exp_v / exp_v.sum()
+
+    def share_of(idx, mu_p):
+        mu_try = mu.copy()
+        mu_try[idx] = mu_p
+        return shares_at(mu_try)[idx]
+
+    active_idx = [i for i in range(len(powertrains)) if not zero_cap[i]]
+    if len(active_idx) > 1:
+        for _ in range(max_sweeps):
+            for i in active_idx:
+                if share_of(i, 0.0) <= cap_arr[i]:
+                    mu[i] = 0.0
+                    continue
+                # Warm-start the bracket from this leaf's own previous-sweep value instead of
+                # always redoubling from 1.0 -- once a leaf's shadow cost is roughly right,
+                # later sweeps only need to nudge it, not rediscover its whole magnitude.
+                lo, hi = 0.0, mu[i] if mu[i] > 0.0 else 1.0
+                while share_of(i, hi) > cap_arr[i] and hi < 1e18:
+                    hi *= 2.0
+                for _ in range(max_bisect):
+                    mid = 0.5 * (lo + hi)
+                    if share_of(i, mid) > cap_arr[i]:
+                        lo = mid
+                    else:
+                        hi = mid
+                mu[i] = hi
+            cur = shares_at(mu)
+            # Complementary slackness, checked properly: an UNCAPPED leaf (mu == 0) just needs
+            # feasibility (share <= cap); a CAPPED leaf (mu > 0) must be tight -- its share must
+            # equal its cap, not merely stay under it. Checking only feasibility here would miss
+            # a leaf that was wrongly capped this sweep from another leaf's stale, not-yet-
+            # updated warm-started value (a real failure mode: leaf A's stale mu makes leaf B
+            # look artificially over its cap when B is processed early in the sweep, so B picks
+            # up an unwarranted mu > 0; once A is corrected later in the sweep B's share settles
+            # comfortably under its own cap, which looks "fine" under a feasibility-only check
+            # even though B should have relaxed back to mu == 0 -- checking tightness for every
+            # capped leaf forces another sweep instead of accepting that inconsistent state).
+            max_gap = 0.0
+            for i in active_idx:
+                if mu[i] > 0.0:
+                    gap = abs(cur[i] - cap_arr[i]) / cap_arr[i]
+                else:
+                    gap = max(0.0, cur[i] - cap_arr[i]) / cap_arr[i]
+                max_gap = max(max_gap, gap)
+            if max_gap < tol:
+                break
+        else:
+            warnings.warn(
+                f"_shadow_price_shares did not converge after {max_sweeps} sweeps "
+                f"(max cap/complementary-slackness gap {max_gap:.2e})"
+            )
+
+    shares = shares_at(mu)
+    return (
+        {p: float(s)  for p, s  in zip(powertrains, shares)},
+        {p: float(mp) for p, mp in zip(powertrains, mu)},
+    )
+
+
 class Fleet:
     def __init__(self, params, param_cps, policies=None, exclude_powertrains=(), foresight=0.0):
         """
@@ -838,6 +965,7 @@ class Fleet:
         self.stock          = {}  # (k, p, model_year, calendar_year) -> trucks
         self.vehicles       = {}  # (k, p, model_year) -> Vehicles
         self.market_share   = {}  # (k, p, calendar_year) -> fraction [0, 1]
+        self._mu_warm_start = {}  # (k, p) -> last-converged shadow cost, warm-starts the next _calculate_market_share call
         self.penalty_history = {}  # calendar_year -> penalty / penalty_max (ZEV mandate)
         self.cost_per_tkm_history    = {}  # (k, calendar_year) -> realized system+policy cost per t-km
         self.revenue_per_tkm_history = {}  # (k, calendar_year) -> revenue_per_tkm applied that year
@@ -1183,7 +1311,7 @@ class Fleet:
 
     def _calculate_market_share(self, k, t):
         """
-        Multinomial logit with iterative production-cap enforcement.
+        Multinomial logit with production caps enforced via shadow pricing.
 
         Unconstrained logit share for powertrain p:
             share(p) = exp(lam x NPV(p)) / sum_q exp(lam x NPV(q))
@@ -1193,29 +1321,33 @@ class Fleet:
 
         Production cap: nascent technologies cannot grow faster than their supply chain allows.
         _market_share_limit() returns the maximum achievable share given last year's share and
-        cagr_nacent / cagr_mature parameters.  If a powertrain's unconstrained share exceeds its
-        cap, its share is fixed at the cap and the remaining market is re-allocated by running
-        another logit over the unconstrained powertrains.  This repeats until no new caps bind
-        (up to 10 iterations, which is always sufficient in practice).
+        cagr_nacent / cagr_mature parameters, exactly as before. Rather than clipping any
+        powertrain that would exceed its cap and re-running the logit over the remaining
+        powertrains (the previous mechanism), a shadow cost mu_p >= 0 is solved for every
+        powertrain jointly (see _shadow_price_shares) so that the resulting logit share never
+        exceeds its cap, with complementary slackness (mu_p > 0 only where the cap binds
+        exactly). Diesel is not a special-cased "unconstrained" powertrain -- its cap is simply
+        never binding in practice given its init_market_limit, so mu_dice always solves to 0
+        via the same mechanism as every other powertrain.
+
+        Warm-started from the last shadow cost found for each (k, p) -- this matters because
+        the ZEV-mandate credit-price bisection in Fleet._run calls this method up to ~30 times
+        per year with only a small shift in npv each time, so most of those calls now resolve
+        in a handful of sweeps instead of searching from mu=0 every time. This changes nothing
+        about the result, only how quickly _shadow_price_shares reaches it.
         """
-        remaining     = set(self.P[k])
-        mkt_remaining = 1.0
-        for _ in range(10):
-            n_prev = len(remaining)
-            denom  = sum(np.exp(self.price_lambda * self.vehicles[k, p, t].npv) for p in remaining)
-            for p in list(remaining):
-                vp    = self.vehicles[k, p, t].params
-                prev  = self.market_share.get((k, p, t - 1), 1.0 if p == 'dice' else 0.0)
-                limit = _market_share_limit(prev, float(vp['init_market_limit']), float(vp['cagr_nacent']), float(vp['cagr_mature']))
-                logit = mkt_remaining * np.exp(self.price_lambda * self.vehicles[k, p, t].npv) / denom
-                if limit <= logit:
-                    self.market_share[k, p, t] = limit
-                    mkt_remaining -= limit
-                    remaining -= {p}
-                else:
-                    self.market_share[k, p, t] = logit
-            if len(remaining) == n_prev:
-                break  # Converged -- no new production-limited powertrains
+        npv  = {p: self.vehicles[k, p, t].npv for p in self.P[k]}
+        caps = {}
+        for p in self.P[k]:
+            vp      = self.vehicles[k, p, t].params
+            prev    = self.market_share.get((k, p, t - 1), 1.0 if p == 'dice' else 0.0)
+            caps[p] = _market_share_limit(prev, float(vp['init_market_limit']), float(vp['cagr_nacent']), float(vp['cagr_mature']))
+
+        mu0 = {p: self._mu_warm_start.get((k, p), 0.0) for p in self.P[k]}
+        shares, mu = _shadow_price_shares(npv, caps, self.price_lambda, mu0=mu0)
+        for p in self.P[k]:
+            self.market_share[k, p, t] = shares[p]
+            self._mu_warm_start[k, p]  = mu[p]
 
     def _aggregate(self):
         """

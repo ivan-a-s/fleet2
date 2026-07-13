@@ -59,12 +59,13 @@ def _run_market_share(powertrains, npvs, price_lambda,
     class _Mock:
         pass
 
-    mock              = _Mock()
-    mock.K            = ['k']
-    mock.P            = {'k': list(powertrains)}
-    mock.price_lambda = price_lambda
-    mock.market_share = {}
-    mock.vehicles     = {}
+    mock                = _Mock()
+    mock.K              = ['k']
+    mock.P              = {'k': list(powertrains)}
+    mock.price_lambda   = price_lambda
+    mock.market_share   = {}
+    mock.vehicles       = {}
+    mock._mu_warm_start = {}
 
     for i, p in enumerate(powertrains):
         init = init_limits[i] if init_limits is not None else 1.0
