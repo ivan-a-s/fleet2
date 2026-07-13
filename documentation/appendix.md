@@ -36,6 +36,7 @@ Source: National Research Council, 2010; NRCan, 2025; Statistics Canada, 2009
 | Diesel | L | 38.6 | 1.1036 | 1.7489 | 1.0 | 2.95 | 0.1 | S&T Squared, 2025; M. Wang et al., 2024 |
 | Electricity (slow charge) | kWh | 3.6 | 0.0099 | 0.0 | 0.95 | 1.43 - 1.88 | 1.0 | Government of B.C., 2025a; M. Wang et al., 2024 |
 | Electricity (fast charge) | kWh | 3.6 | 0.0099 | 0.0 | 0.86 | 1.43 - 1.88 | 1.0 | Government of B.C., 2025a; M. Wang et al., 2024 |
+| Electricity (public slow charge) | kWh | 3.6 | 0.0099 | 0.0 | 0.95 | 1.43 - 1.88 | 1.0 | Government of B.C., 2025a; M. Wang et al., 2024 |
 | Hydrogen (electrolysis) | kg | 120.0 | 0.57 | 0.0 | 1.0 | 95.6 - 121.4 | 55.0 | A. Franco et al., 2023; IRENA and Bluerisk, 2023 |
 | Hydrogen (pyrolysis) | kg | 120.0 | 6.44 | 0.0 | 1.0 | 4.71 - 5.66 | 2.12 | Serrato & Rowe, 2025; M. Wang et al., 2024 |
 | Hydrogen (electrified pyrolysis) | kg | 120.0 | 1.92 | 0.0 | 1.0 | 16.3 - 20.9 | 10.23 | Serrato & Rowe, 2025; Wang et al., 2024; Seymour et al., 2024 |
@@ -116,7 +117,7 @@ Source: National Research Council, 2010; NRCan, 2025; Statistics Canada, 2009
 |---|---|---|---|
 | Powertrain mass (motor) | 537 | kg | M. Wang et al., 2024 |
 | Motor efficiency | 0.875 |  | Lajevardi et al., 2019 |
-| Battery capacity (sleeper / day-cab / straight) | 1000 / 600 / 500 | kWh | Table 15 |
+| Battery capacity (sleeper / day-cab / straight) | 2025: 900; 2050: 700 / 2025: 900; 2050: 700 / 2025: 300; 2050: 250 | kWh | Table 15 |
 | Battery usable capacity | 2025: 0.8; 2030: 0.85-0.9; 2050: 0.9-0.95 |  | Table 15 |
 | Charging rate | 2025: 250.0 -> 2050: triangular(250.0,500.0,750.0) | kW | Table 15 |
 | Regen efficiency | 0.71 |  | Table 15 |
@@ -175,6 +176,7 @@ Uniformly distributed between low and high in Monte Carlo analysis.
 | Diesel | L | 1.67-1.73 | 1.46-1.81 | 1.65-1.91 | 1.74-2.08 | 1.71-2.18 | 1.67-2.15 | CER, 2023 |
 | Electricity (fast charge) | kWh | 0.36-0.361 | 0.368-0.372 | 0.374-0.385 | 0.382-0.397 | 0.401-0.407 | 0.412-0.418 | BC Hydro, 2025b; CER, 2023 |
 | Electricity (slow charge) | kWh | 0.102-0.103 | 0.105-0.106 | 0.106-0.11 | 0.109-0.113 | 0.114-0.116 | 0.117-0.119 | BC Hydro, 2025; CER, 2023 |
+| Electricity (public slow charge) | kWh | 0.138-0.14 | 0.142-0.144 | 0.144-0.149 | 0.148-0.153 | 0.155-0.157 | 0.159-0.161 | BC Hydro Fleet Electrification Demand Transition Rate, RS 1650-1653 (accessed 2026); scaled from slow_charge by the Demand Transition/Overnight energy-charge ratio (11.37c / 8.38c = 1.357x) to preserve slow_charge's sourced trajectory shape |
 | Hydrogen (electrolysis) | kg | 14.97 | 8.4-11.13 | 6.55-10.56 | 5.25-6.34 | 5.2-6.13 | 5.15-5.94 | CICE, 2024 |
 | Hydrogen (pyrolysis) | kg | 11.05 | 7.24-7.38 | 5.41-6.96 | 4.18-5.21 | 2.91-5.02 | 2.8-4.85 | CICE, 2024 |
 | Hydrogen (electrified pyrolysis) | kg | 15.85 | 9.9-11.81 | 7.86-11.05 | 5.6-7.48 | 4.75-7.12 | 4.55-6.81 | CICE, 2024 |

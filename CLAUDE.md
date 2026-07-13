@@ -9,7 +9,7 @@ powertrains that contain that component, rather than sampled independently.
 
 - **Vehicle types:** `sleeper`, `day_cab`, `straight` (Class 8)
 - **Powertrains:** `dice`, `he` (mild hybrid), `phe` (plug-in hybrid), `be`, `fc`, `hice`, `dhice`
-- **Fuels:** `diesel`, `h2` (electrolysis), `h2_p` (pyrolysis), `h2_pe` (electrified pyrolysis), `fast_charge`, `slow_charge`
+- **Fuels:** `diesel`, `h2` (electrolysis), `h2_p` (pyrolysis), `h2_pe` (electrified pyrolysis), `fast_charge`, `slow_charge`, `public_slow_charge` (non-depot slow charging, e.g. sleeper PHE charging during a rest break; BC Hydro Fleet Demand Transition Rate)
 - **Policies:** `CarbonTax`, `GVWLExemption`, `LCFS`, `ZEVMandate` — all implemented in `policies.py`
 
 ## Key files

@@ -17,11 +17,10 @@ The simulation proceeds in three layers:
 
 To do:
  Needs changing later:
- - Uncertainty analysis (reduce params?).
+ - Proper verification of key parameters (fuel consumption).
+ - Uncertain market heterogeneity quotient.
 
  Nice to have (in order of priority):
- - Fast and slow charge could be merged and have a different way of
-   doing the pricing. Sleeper PHEs could use non-depot slow charge.
  - Add a resource-haul vehicle type.
  - Size vehicle components for NPV optimisation?
  - Scale factors to relate cost to scale somehow.
@@ -36,6 +35,7 @@ To do:
  - Nested logit (all diesel compete together).
  - Simplify params (one motor and then just change the mass with the powertrain etc.)
  - HDRD proportion may change over time. Make this possible (could be through CI distribution).
+ - Sobol analysis.
 
  Checked up to:
   - _calculate_fuel_consumption
@@ -710,10 +710,8 @@ class Vehicles:
                 c['after_treatment'] = self._cap_cost('after_treatment')
         if self.p in CHARGER_POWERTRAINS and self.k != 'sleeper':
             c['charger'] = self._cap_cost('charger_50kw')
-        if self.p == 'phe':
-            _phe_bfuel = next((f for f in self.fuels if 'charge' in f), None)
-            if _phe_bfuel and _phe_bfuel != 'fast_charge':
-                c['charger'] = 0.25 * self._cap_cost('charger_50kw')
+        if self.p == 'phe' and self.k != 'sleeper':
+            c['charger'] = 0.25 * self._cap_cost('charger_50kw')
         self.capital       = c
         self.capital_total = sum(c.values())
 

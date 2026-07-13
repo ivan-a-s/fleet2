@@ -31,12 +31,14 @@ FUEL_TO_MJ = {
     'h2_pe':      120.0 * 0.60,
     'slow_charge':  3.6 * 0.90,   # kWh ->  3.2 MJ
     'fast_charge':  3.6 * 0.90,
+    'public_slow_charge': 3.6 * 0.90,
 }
 
 FUEL_COLOR = {
     'diesel':      PT_COLOR['dice'],
     'slow_charge': PT_COLOR['be'],
     'fast_charge': _CYCLE[7 % len(_CYCLE)],
+    'public_slow_charge': _CYCLE[8 % len(_CYCLE)],
     'h2':          PT_COLOR['fc'],
     'h2_p':        PT_COLOR['hice'],
     'h2_pe':       PT_COLOR['dhice'],

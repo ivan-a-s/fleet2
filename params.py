@@ -221,6 +221,31 @@ PARAM_DICT = {
                  "2050": {"dist": "uniform", "min": 0.117, "max": 0.119}},
                 src="BC Hydro, 2025; CER, 2023", units="CAD/kWh"),
         },
+
+        "public_slow_charge": {
+            "units":   P("kWh"),
+            "lhv":     P(3600000.0, src="Government of B.C., 2025a; M. Wang et al., 2024", units="J/kWh"),
+            "emissions_intensity": {
+                "supply": P(0.0099, src="Government of B.C., 2025a; M. Wang et al., 2024", units="kgCO2e/kWh"),
+                "use":    P(0.0,    src="Government of B.C., 2025a; M. Wang et al., 2024", units="kgCO2e/kWh"),
+            },
+            "refuel_efficiency":    P(0.95, src="Franca et al., 2018"),
+            "water_intensity":      P({"dist": "uniform", "group": "charge_water_intensity", "min": 1.43, "max": 1.88},
+                                      src="Government of B.C., 2025a; M. Wang et al., 2024", units="L/kWh"),
+            "electricity_intensity": P(1.0, units="kWh/kWh"),
+            "cost": P(
+                {"dist": "interp", "group": "charge_cost",
+                 "2025": {"dist": "uniform", "min": 0.138, "max": 0.140},
+                 "2030": {"dist": "uniform", "min": 0.142, "max": 0.144},
+                 "2035": {"dist": "uniform", "min": 0.144, "max": 0.149},
+                 "2040": {"dist": "uniform", "min": 0.148, "max": 0.153},
+                 "2045": {"dist": "uniform", "min": 0.155, "max": 0.157},
+                 "2050": {"dist": "uniform", "min": 0.159, "max": 0.161}},
+                src="BC Hydro Fleet Electrification Demand Transition Rate, RS 1650-1653 (accessed 2026); "
+                    "scaled from slow_charge by the Demand Transition/Overnight energy-charge ratio "
+                    "(11.37c / 8.38c = 1.357x) to preserve slow_charge's sourced trajectory shape",
+                units="CAD/kWh"),
+        },
     },
 
     "vehicles": {
@@ -615,8 +640,8 @@ PARAM_DICT = {
                             "after_treatment":         {"type": "accessories"},
                         },
                         "fuels": {
-                            "fast_charge": {"proportion": 0.5},
-                            "diesel":      {"proportion": 0.5},
+                            "public_slow_charge": {"proportion": 0.5},
+                            "diesel":             {"proportion": 0.5},
                         },
                         "regen_efficiency": P(0.71, src="Table 14", notes="power-limited"),
                         "accessory_load":   P(3400, src="Ramesh Babu et al., 2025", units="W"),
@@ -631,7 +656,12 @@ PARAM_DICT = {
                         "components": {
                             "motor":                  {"type": "converter",    "capacity": 880},
                             "electronic_controller":  {"type": "converter"},
-                            "battery":                {"type": "ess",          "capacity": 1000},
+                            # BET battery design envelope, NPV-informed (2026-07-13): 900 kWh in
+                            # 2025 declining linearly to 700 kWh by 2050.
+                            "battery":                {"type": "ess", "capacity":
+                                {"dist": "interp",
+                                 "2025": {"dist": "const", "val": 900},
+                                 "2050": {"dist": "const", "val": 700}}},
                             "electric_transmission":  {"type": "transmission"},
                         },
                         "fuels": {"fast_charge": {"proportion": 1.0}},
@@ -819,7 +849,12 @@ PARAM_DICT = {
                         "components": {
                             "motor":                 {"type": "converter",    "capacity": 880},
                             "electronic_controller": {"type": "converter"},
-                            "battery":               {"type": "ess",          "capacity": 600},
+                            # BET battery design envelope, NPV-informed (2026-07-13): 900 kWh in
+                            # 2025 declining linearly to 700 kWh by 2050.
+                            "battery":               {"type": "ess", "capacity":
+                                {"dist": "interp",
+                                 "2025": {"dist": "const", "val": 900},
+                                 "2050": {"dist": "const", "val": 700}}},
                             "electric_transmission": {"type": "transmission"},
                         },
                         "fuels": {"slow_charge": {"proportion": 1.0}},
@@ -1003,7 +1038,12 @@ PARAM_DICT = {
                         "components": {
                             "motor":                 {"type": "converter",    "capacity": 880},
                             "electronic_controller": {"type": "converter"},
-                            "battery":               {"type": "ess",          "capacity": 500},
+                            # BET battery design envelope, NPV-informed (2026-07-13): 300 kWh in
+                            # 2025 declining linearly to 250 kWh by 2050.
+                            "battery":               {"type": "ess", "capacity":
+                                {"dist": "interp",
+                                 "2025": {"dist": "const", "val": 300},
+                                 "2050": {"dist": "const", "val": 250}}},
                             "electric_transmission": {"type": "transmission"},
                         },
                         "fuels": {"slow_charge": {"proportion": 1.0}},

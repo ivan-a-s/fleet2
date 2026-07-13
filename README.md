@@ -7,7 +7,7 @@ that contain that component, rather than sampled independently.
 
 - **Vehicle types:** `sleeper`, `day_cab`, `straight` (Class 8)
 - **Powertrains:** `dice`, `he`, `phe`, `be`, `fc`, `hice`, `dhice`
-- **Fuels:** `diesel`, `h2`, `h2_p`, `h2_pe`, `fast_charge`, `slow_charge`
+- **Fuels:** `diesel`, `h2`, `h2_p`, `h2_pe`, `fast_charge`, `slow_charge`, `public_slow_charge`
 - **Horizon:** 2025–2050, annual steps
 
 ---
