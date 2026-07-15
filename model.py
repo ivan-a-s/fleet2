@@ -21,18 +21,18 @@ To do:
 
  Nice to have (in order of priority):
  - Add a resource-haul vehicle type.
- - Scale factors to relate cost to scale somehow.
- - Variance in use (logit change like NREL).
- - Make scrappage/usage decisions for vehicles?
- - Hotel load for sleepers and fridge units?
- - Improve the battery accessory load estimation.
- - Activity price elasticity.
- - Add autonomous vehicles again.
  - Convervative behavioiur (favour incumbent).
+ - Scale factors to relate cost to scale somehow.
+ - Activity price elasticity.
+ - Improve the battery accessory load estimation.
+ - Variance in use (logit change like NREL).
+ - Add autonomous vehicles again.
  - Nested logit (all diesel compete together).
  - Simplify params (one motor and then just change the mass with the powertrain etc.)
  - HDRD proportion may change over time. Make this possible (could be through CI distribution).
  - Sobol analysis.
+ - Hotel load for sleepers and fridge units?
+ - Make scrappage/usage decisions for vehicles?
 
  Checked up to:
   - _calculate_fuel_consumption
