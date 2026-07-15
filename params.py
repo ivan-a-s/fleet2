@@ -32,7 +32,23 @@ PARAM_DICT = {
                                    notes="National Research Council, 2010; NRCan, 2025; Statistics Canada, 2009"),
         "activity_growth":       P(0.02,    src="Table 7"),
         "autonomous_t50":        P(2040,    notes="model uses 2040 point estimate; paper Table 10 shows triangular(2035,2040,2070) for scenario analysis"),
-        "price_lambda":          P(0.00003, src="Table 7", notes="logit scale; market sensitivity"),
+        "price_lambda":          P({"dist": "uniform", "min": 0.00001, "max": 0.00003},
+                                   src="UNREF -- assumption; Table 7 point estimate 0.00003 used "
+                                       "as the upper bound, lower bound is not sourced",
+                                   notes="logit scale; market sensitivity"),
+        "nest_lambdas": {
+            "liquid":       P(0.7, src="UNREF -- assumption", units="dimensionless",
+                              notes="Nest scale for Liquid (Conventional sub-nest + phe); "
+                                    "lower = stronger within-nest correlation/substitution"),
+            "conventional": P(0.4, src="UNREF -- assumption", units="dimensionless",
+                              notes="Sub-nest scale for dice/he under Liquid"),
+            "hydrogen":     P(0.6, src="UNREF -- assumption", units="dimensionless",
+                              notes="Nest scale for fc/hice/dhice"),
+            "electric":     P(1.0, src="UNREF -- assumption", units="dimensionless",
+                              notes="Nest scale for be (singleton nest -- value has no effect "
+                                    "on shares, kept at 1.0 to match the all-lambda=1 "
+                                    "flat-MNL check)"),
+        },
         "social_cost_of_carbon": P(59.276,  units="CAD/tCO2e", notes="model internal; not in Appendix A"),
         "revenue_markup":        P(1.2, src="UNREF -- assumption", units="dimensionless",
                                    notes="Freight revenue per t-km is set to this multiple of the "

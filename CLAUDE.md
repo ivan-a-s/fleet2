@@ -100,7 +100,7 @@ This compares 2236 fleet output values and reports any that shifted by more than
 - [x] `Vehicles` class — complete: mass, fuel consumption (FASTSim surrogate), range, annual_distance, FC replacements, emissions, capital_cost, annual_cost, TCO, NPV
 - [x] `Fleet._build_initial_stock()` — complete: pre-2025 diesel cohorts sized to match activity requirement
 - [x] `Fleet._run()` — complete: year-by-year roll-over, vehicle creation, market share, new purchases
-- [x] `Fleet._calculate_market_share()` — complete: flat multinomial logit + production caps enforced via shadow pricing (see "Market-share allocation architecture" below); nested logit is the next step, not yet started
+- [x] `Fleet._calculate_market_share()` — complete: nested logit (`NEST_TREE`) + production caps enforced via shadow pricing (see "Market-share allocation architecture" below)
 - [x] `Fleet._aggregate()` — complete: total_stock, sales, fuel_usage, emissions, system_costs
 - [x] `plots/vehicle_plots.py` — per-cohort sanity checks; `plots/fleet_plots.py` — fleet-level line plots
 - [x] `policies.py` — `CarbonTax`, `GVWLExemption`, `LCFS`, `ZEVMandate`, `Policies` container; comparison plots in `plots/policy_plots/`
@@ -118,6 +118,8 @@ Module constants:   _SURROGATES (loaded from vehicle_modelling/surrogates.json),
                     SURROGATE_NAME, EFF_COMPONENT,
                     ZEV_POWERTRAINS, HICE_POWERTRAINS,
                     CHARGER_POWERTRAINS, ALL_POWERTRAINS,
+                    NEST_TREE (nested-logit tree, see "Market-share allocation
+                    architecture" below), _NEST_TREE_LEAVES,
                     _YEAR0 (= START_YEAR - MAX_AGE, first year in all realised arrays)
 
 Vehicles class:     _calculate_mass, _calculate_fuel_consumption,
@@ -135,38 +137,97 @@ Fleet class:        _make_vehicle, _apply_mandate_credit, _build_initial_stock, 
                     architecture" below)
 
 Module functions:   _market_share_limit (production cap helper, unchanged),
+                    _prune_tree, _bottom_up_utility, _top_down_shares (nested-logit
+                    tree evaluator, called from inside _shadow_price_shares),
                     _shadow_price_shares (shadow-price solver -- see below)
 ```
 
 ## Market-share allocation architecture (`Fleet._calculate_market_share`, `_shadow_price_shares`)
 
-**Status: flat logit + shadow pricing is done and verified. Nested logit is the next step (not started).**
+**Status: nested logit + shadow pricing is done and verified (snapshot re-saved with the real
+tree lambdas; see below for the verification sequence and what it found).**
 
 Utility for powertrain `p` is `price_lambda * NPV(p)` (higher NPV = more desirable; `price_lambda`
-is positive, `params.py: fleet.price_lambda`). Production caps (`_market_share_limit()`, unchanged
-from before — ratchets a share cap off last year's own share via `init_market_limit` /
-`cagr_nacent` / `cagr_mature`) used to be enforced by **clipping**: run the flat logit, pin any
-powertrain that exceeds its cap at the cap value, remove it, and re-run the logit over the
-survivors, repeating until nothing new binds (≤10 passes). This was replaced with **shadow
-pricing**: a shadow cost `mu_p >= 0` is solved for every powertrain so that `V_p = price_lambda *
-(NPV(p) - mu_p)` enters the *same* softmax as everyone else (nobody is ever removed from the
-choice set), with complementary slackness — `mu_p > 0` only where the cap binds exactly. Under a
-single flat logit the two mechanisms are provably equivalent (IIA: a third powertrain's relative
-odds against the others don't depend on *how* a capped powertrain's excess demand is discouraged,
-only on the share it ends up with) — confirmed by an exact match (2236/2236 values within 0.01%)
-against the pre-shadow-pricing snapshot. They will **not** stay equivalent once nested logit is
-added (see "Next steps") — that's the actual reason shadow pricing exists at all; a capped leaf
-that's *removed* rather than *discounted* leaks a wrong (inflated) inclusive value up through its
-nest, distorting every sibling nest's share. That distortion is largest exactly when several
-members of the same nest are simultaneously and severely capped — i.e. nascent ZEV/H2 technology
-in the early simulation years, the part of the trajectory the whole model exists to get right.
+is positive, `params.py: fleet.price_lambda` -- now MC-varied, see "Key params.py fields to know").
+Production caps (`_market_share_limit()`, unchanged from before — ratchets a share cap off last
+year's own share via `init_market_limit` / `cagr_nacent` / `cagr_mature`) used to be enforced by
+**clipping**: run the flat logit, pin any powertrain that exceeds its cap at the cap value, remove
+it, and re-run the logit over the survivors, repeating until nothing new binds (≤10 passes). This
+was replaced with **shadow pricing**: a shadow cost `mu_p >= 0` is solved for every powertrain so
+that `V_p = price_lambda * (NPV(p) - mu_p)` enters the choice set as a leaf utility (nobody is ever
+removed from the tree), with complementary slackness — `mu_p > 0` only where the cap binds exactly.
+Under a single flat logit, clipping and shadow pricing are provably equivalent (IIA: a third
+powertrain's relative odds against the others don't depend on *how* a capped powertrain's excess
+demand is discouraged, only on the share it ends up with) — this was confirmed by an exact match
+(2236/2236 values within 0.01%) against the pre-shadow-pricing snapshot, back when the choice set
+was still flat. They do **not** stay equivalent once nesting is live — that's the actual reason
+shadow pricing was built before nesting: a capped leaf that's *removed* rather than *discounted*
+leaks a wrong (inflated) inclusive value up through its nest, distorting every sibling nest's share.
+That distortion is largest exactly when several members of the same nest are simultaneously and
+severely capped — i.e. nascent ZEV/H2 technology in the early simulation years, the part of the
+trajectory the whole model exists to get right.
+
+**The nested tree** (module-level `NEST_TREE` in `model.py`, a plain nested-tuple structure —
+`(name, lambda_key, children)` for non-leaf nodes, bare powertrain strings for leaves; the tree
+shape is code, not a `params.py` value, since it encodes a structural/modeling decision with no
+number to cite, same status as `ZEV_POWERTRAINS`):
+
+```
+Liquid (lambda=0.7)
+  Conventional (lambda=0.4): dice, he
+  phe
+Hydrogen (lambda=0.6): fc, hice, dhice
+Electric (lambda=1.0): be
+```
+
+`dhice` sits in Hydrogen (not Liquid) despite being a 75%-diesel/25%-H2 dual-fuel ICE — grouped
+with fc/hice by ZEV-adjacent substitution pattern, not by fuel share. The four lambda *values*
+(0.7/0.4/0.6/1.0) live in `params.py: fleet.nest_lambdas` as plain `P(value, src="UNREF --
+assumption")` scalars — not yet calibrated from data.
+
+**Math convention:** McFadden nested logit, `U_n = lambda_n * ln(sum_c exp(U_c / lambda_n))`
+feeding each node's utility up to its parent (leaf utility `V_p` at the bottom), with
+`P(c|n) = exp(U_c/lambda_n) / sum exp(U_c'/lambda_n)` distributing probability back down; the
+root (parent of Liquid/Hydrogen/Electric) has its own scale fixed at 1.0 (nothing sits above it to
+rescale against, so it isn't a `params.py` value). This specific convention — scaling the
+log-sum-exp by `lambda_n` before handing it to the parent, rather than passing a raw un-scaled
+inclusive value up — is what makes an all-`lambda=1` tree collapse to exactly the flat softmax at
+any depth (verified both by hand and empirically: `verification/test_limits.py`'s
+`test_all_nest_lambdas_one_matches_flat_mnl`, and a full-`Fleet()` run with `nest_lambdas` forced
+to all-1.0 matched the pre-nesting snapshot exactly before the real lambdas were ever turned on).
+A singleton nest (e.g. Electric = `{be}` alone) needs no special-case code — `U_n` collapses to
+`V_be` algebraically for any `lambda_n`, so a nest that *becomes* a singleton via
+`exclude_powertrains` or zero-cap pruning (e.g. `he` excluded, leaving `dice` alone in
+Conventional) also collapses correctly for free. Zero-cap leaves are pruned out of the tree
+entirely before evaluation (not just zeroed in final probability) so they can't pollute their
+former nest's inclusive value — see `_prune_tree`/`_shadow_price_shares`.
+
+**How to think about the lambda values:** each is a knob on how much a nest's members are seen as
+variants of the same underlying choice vs. genuinely independent alternatives.  `lambda=1` = no
+family effect (behaves like flat MNL locally). `lambda -> 0` = near-perfect substitutes — a shift
+between two nest-mates mostly reallocates share *between them*, and the nest avoids the classic
+red-bus/blue-bus over-counting (two near-identical options don't out-compete a dissimilar one just
+by being two draws instead of one). Concretely: dice/he (lambda=0.4, tightest) are "the same truck,
+optionally hybridized" — a trim choice, not a technology bet. phe joins them under Liquid
+(lambda=0.7, looser) since it's still liquid-fuelled but a more distinct drivetrain. fc/hice/dhice
+(lambda=0.6) share H2 supply-chain/infrastructure risk. Electric's lambda is a placeholder (no
+effect while it's a singleton). One clean way to see the effect empirically: within a nest, the
+effective sensitivity comparing two members is `price_lambda/lambda_n` (2.5x for Conventional) —
+this is exactly why nesting pushed already-losing same-nest powertrains (e.g. residual `dice` share
+against a dominant `he`) further toward zero relative to the pre-nesting numbers; across nests, the
+root's own scale stays fixed at 1.0, so top-level comparisons aren't sharpened, only each nest's
+internal "diversity bonus" is corrected.
 
 **Solver (`_shadow_price_shares`, `model.py`):** Gauss-Seidel sweeps — one powertrain's `mu` at a
 time, by **bisection**, holding every other powertrain's `mu` fixed at its current value, cycling
 through all powertrains repeatedly. Bisection (not a joint Newton/multiplicative fixed-point step)
-was chosen because `share_p(mu_p)`, holding everything else fixed, is strictly monotonically
-decreasing — bisection can't overshoot regardless of how close a share is to saturating at 0 or 1.
-An earlier joint-Newton version overshot badly and oscillated once several powertrains were
+was chosen because `share_p(mu_p)`, holding everything else fixed, is monotonically
+non-increasing — bisection can't overshoot regardless of how close a share is to saturating at 0
+or 1. This still holds under nesting: raising `mu_p` strictly lowers leaf `p`'s own utility, which
+strictly lowers its within-nest conditional share and non-decreasingly lowers its nest's inclusive
+value relative to sibling nests — a product of factors each non-decreasing (one strictly
+increasing) in that utility can't increase as the utility falls, at any tree depth. An earlier
+joint-Newton version overshot badly and oscillated once several powertrains were
 simultaneously and severely capped (residual pinned at a large constant, never shrinking) — the
 same lesson this codebase already learned once for the ZEV-mandate credit-price search (bisection
 over a damped blend, `policies.py`/`Fleet._run`, because a damped blend oscillated on a steep
@@ -195,30 +256,30 @@ waterfall): baseline/carbon_tax/lcfs/gvwl ~1.0–1.3 s (1.6–2.2× the old ~0.6
 Still fine for Monte Carlo given policy scenarios also need fewer runs to converge, but worth
 knowing before assuming a `run.py` pass will take the same wall-clock time it used to.
 
-**For the nested-logit step:** the outer Gauss-Seidel/bisection/warm-start machinery is expected
-to carry over unchanged — per-leaf bisection only requires `share_of(idx, mu_p)` to be
-monotonically decreasing in `mu_p` holding everything else fixed, which holds equally whether
-`shares_at()` is a flat softmax or a nested-logit tree evaluated bottom-up (utility) then top-down
-(probability). The plan is to swap out `shares_at()`'s internals for the tree evaluator rather
-than design a new solver. Agreed tree (dhice placed in Hydrogen — it's a 75%-diesel/25%-H2
-dual-fuel ICE, but grouped with FC/HICE by ZEV-adjacent substitution pattern, not by fuel share):
+**Convergence tuning (`max_sweeps=300`, `tol=1e-5`):** originally `max_sweeps=200`, `tol=1e-7`.
+Once `fleet.price_lambda` gained a `dist` (see "Key params.py fields to know"), the median run
+(cp=0.5) started drawing `price_lambda=0.00002` instead of the old fixed `0.00003`, and one
+early-year sleeper case (four powertrains simultaneously capped across three different nests —
+`he`/Conventional, `phe`/Liquid, `be`/Electric, `fc`/Hydrogen) needed 262 sweeps to clear the old
+`1e-7` tolerance. Traced sweep-by-sweep: the gap shrank monotonically and geometrically the whole
+way (not the oscillation failure mode described above) — nesting adds an extra coupling channel
+between simultaneously-capped powertrains in *different* nests via their shared parent's inclusive
+value, on top of a lower `price_lambda` flattening the logit and requiring larger `mu` excursions
+to hit the same cap. Both changes are safe: `tol=1e-5` is still 10x tighter than
+`verification/snapshot.py`'s own `RTOL=1e-4` materiality threshold, so any leftover imprecision
+stays invisible to what the project already treats as "a real change"; `max_sweeps=300` is pure
+headroom (can't change the converged answer, only whether the loop reaches it in time) and costs
+nothing on the vast majority of calls that already converge in single digits via warm-starting.
 
-```
-Liquid (lambda=0.7)
-  Conventional (lambda=0.4): dice, he
-  phe
-Hydrogen (lambda=0.6): fc, hice, dhice
-Electric (lambda=1.0): be
-```
-
-Lambda values are not yet in `params.py` (they'd go in `fleet.nest_lambdas`, parallel to
-`price_lambda`, as plain `P(value, src="UNREF -- assumption")` scalars — mechanically transparent
-through `data.py`, no special handling needed). An earlier planning pass for a nesting-first
-(waterfall-unchanged) version produced a plan file
-(`C:\Users\ivana\.claude\plans\go-ahead-and-make-bubbly-ocean.md`) — **that plan is now stale**:
-it assumed nesting would sit on top of the old clipping mechanism, but shadow pricing has replaced
-that mechanism entirely. Nesting needs to be layered onto the shadow-pricing solver described
-above instead.
+**Verification sequence actually used** (worth repeating if this solver or the tree is touched
+again): (1) confirm the pre-change snapshot passes; (2) implement; (3) force all four
+`nest_lambdas` to 1.0 *in memory only* (never edit `params.py` for this step) and check against
+the **old, not-yet-resaved** snapshot — this is the strongest end-to-end proof the tree evaluator
+is wired correctly, since it exercises the full `Fleet()` simulation, not just hand-picked unit
+tests; (4) revert to real lambdas, run `verification/test_limits.py`; (5) check the snapshot with
+real lambdas — expect genuine, broad mismatches now (not a bug) and inspect only for plausibility
+(shifts concentrated in same-nest ZEV/H2 competition and the Liquid-branch restructuring, no sign
+flips or blow-ups); (6) re-save intentionally once satisfied.
 
 ## Policy architecture (`policies.py`)
 
@@ -252,7 +313,12 @@ in `scenarios.py` like `targets`/`penalty`/`scope` — not calibrated params.py 
 ## Key params.py fields to know
 
 - `settings`: max_age=25, start_year=2025, end_year=2050, discount_rate=0.08, growth_rate=0.02
-- `fleet`: initial_activity, activity_growth=0.02, price_lambda=0.00003, autonomous_t50=2040
+- `fleet`: initial_activity, activity_growth=0.02, autonomous_t50=2040
+- `fleet.price_lambda`: `dist: uniform, min=0.00001, max=0.00003` (MC-varied; median/cp=0.5 draw
+  is 0.00002, not the old fixed 0.00003 — the upper bound is the original Table 7 point estimate,
+  the lower bound is `UNREF -- assumption`, "a finger-in-the-air number")
+- `fleet.nest_lambdas`: `{liquid: 0.7, conventional: 0.4, hydrogen: 0.6, electric: 1.0}` — fixed
+  (no `dist`), see "Market-share allocation architecture" above
 - `vehicles.components`: shared component defs (`converter`, `ess`, `transmission`) — each powertrain references these by type to avoid independent MC draws
 - Per-powertrain: `init_market_limit` (1.0 for dice, 0.02 for others), `cagr_nacent`, `cagr_mature`
 - Surrogate mapping: both `hice` and `dhice` reuse the `he` surrogate (all 5 drive cycles); `phe` only has `udds_hdt`/`cruise_hdt` (no haul-specific files)
@@ -269,13 +335,19 @@ in `scenarios.py` like `targets`/`penalty`/`scope` — not calibrated params.py 
 
 ## Next steps
 
-1. **Nested logit** (next session) — replace the flat softmax inside `_shadow_price_shares`
-   with the agreed tree (see "Market-share allocation architecture" above); reuse the existing
-   Gauss-Seidel/bisection/warm-start solver rather than writing a new one. Add `fleet.nest_lambdas`
-   to `params.py`. Verify with `verification/test_limits.py` (some tests encode flat-MNL-specific
-   expected values — e.g. equal-NPV-gives-uniform-1/N — that won't hold once nests have unequal
-   cardinality; that's an expected, correct nested-logit property, not a bug) and expect the
-   snapshot to genuinely shift this time (re-save intentionally once verified).
+1. ~~Nested logit~~ — **done.** `NEST_TREE` + `fleet.nest_lambdas` implemented, verified (degenerate
+   all-lambda=1.0 case matched the pre-nesting snapshot exactly; real lambdas re-saved
+   intentionally after inspecting for plausibility), and `fleet.price_lambda` now varies in MC
+   (`dist: uniform, min=0.00001, max=0.00003`) — see "Market-share allocation architecture" and
+   "Key params.py fields to know" above. Contrary to the original prediction here, none of the 7
+   pre-existing `verification/test_limits.py` cases actually needed changes — every one uses at
+   most one real powertrain per top-level branch, which collapses to flat MNL regardless of
+   lambda (traced explicitly). 6 new nested-logit-specific tests were added instead (degenerate
+   reduction, within-nest ratio invariance, cross-nest IIA-violation demonstration, singleton-nest
+   invariance, zero-cap exclusion from inclusive value, multi-same-nest-binding-cap convergence).
+   Discovered along the way: widening `price_lambda`'s range exposed a slow (not oscillating)
+   shadow-pricing convergence case at the low end, fixed by loosening `max_sweeps`/`tol` (see
+   "Convergence tuning" above) rather than narrowing the range.
 2. Check total mass plausibility — sleeper diesel showing 28.9 t loaded (expect ~36-40 t)
 3. Verify `model.py` checked up to `_calculate_fuel_consumption` — remaining methods still need review
 4. Stage 4 policy improvements: dynamic LCFS credit pricing, ZEV purchase rebate, joint mandate+LCFS convergence (see `POLICY_PLAN.md`)

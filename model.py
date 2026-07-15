@@ -18,7 +18,6 @@ The simulation proceeds in three layers:
 To do:
  Needs changing later:
  - Proper verification of key parameters (fuel consumption).
- - Uncertain market heterogeneity quotient.
 
  Nice to have (in order of priority):
  - Add a resource-haul vehicle type.
@@ -98,6 +97,35 @@ ZEV_POWERTRAINS     = {'be', 'fc', 'hice'}
 HICE_POWERTRAINS    = {'hice', 'dhice'}
 CHARGER_POWERTRAINS = {'be'}
 ALL_POWERTRAINS     = frozenset({'dice', 'he', 'phe', 'be', 'fc', 'hice', 'dhice'})
+
+# Nested-logit tree for market-share allocation (_shadow_price_shares). Each non-leaf node is
+# (name, lambda_key, children); leaves are bare powertrain strings. lambda_key indexes into
+# Fleet.nest_lambdas (params.py: fleet.nest_lambdas); the root's lambda_key is None, meaning its
+# scale is fixed at 1.0 -- nothing sits above the root to rescale against, so it is not a
+# params.py value. dhice sits in Hydrogen (not Liquid) despite being a 75%-diesel/25%-H2
+# dual-fuel ICE -- grouped by ZEV-adjacent substitution pattern with fc/hice, not by fuel share.
+NEST_TREE = ('root', None, (
+    ('Liquid', 'liquid', (
+        ('Conventional', 'conventional', ('dice', 'he')),
+        'phe',
+    )),
+    ('Hydrogen', 'hydrogen', ('fc', 'hice', 'dhice')),
+    ('Electric', 'electric', ('be',)),
+))
+
+
+def _walk_leaves(node):
+    if isinstance(node, str):
+        yield node
+    else:
+        for c in node[2]:
+            yield from _walk_leaves(c)
+
+
+_NEST_TREE_LEAVES = frozenset(_walk_leaves(NEST_TREE))
+assert _NEST_TREE_LEAVES == ALL_POWERTRAINS, (
+    f"NEST_TREE leaves {_NEST_TREE_LEAVES} != ALL_POWERTRAINS {ALL_POWERTRAINS}"
+)
 COST_CATEGORIES     = {
     'system': ('capital', 'operational', 'fuel', 'driver', 'fc_replacements'),
     'policy': ('carbon_tax', 'lcfs', 'zev_mandate'),
@@ -796,24 +824,88 @@ def _market_share_limit(prev_share, init, cagr_nacent, cagr_mature, threshold=0.
     return prev_share * (1 + cagr_mature) / (1 + GROWTH_RATE)
 
 
-def _shadow_price_shares(npv, caps, price_lambda, mu0=None, max_sweeps=200, max_bisect=40, tol=1e-7):
+def _prune_tree(node, active_leaves):
     """
-    Solve for a shadow cost mu_p >= 0 per powertrain p such that the resulting flat-logit
+    Return a copy of `node` (a NEST_TREE node) keeping only leaves in active_leaves, dropping
+    any subtree that becomes empty as a result. Returns None if nothing survives.
+    """
+    if isinstance(node, str):
+        return node if node in active_leaves else None
+    name, lambda_key, children = node
+    kept = [p for p in (_prune_tree(c, active_leaves) for c in children) if p is not None]
+    return (name, lambda_key, tuple(kept)) if kept else None
+
+
+def _bottom_up_utility(node, V, nest_lambdas, out):
+    """
+    Post-order pass: out[leaf name or id(subtree node)] = utility this node contributes to its
+    parent (a leaf's own utility, or a nest's lambda-scaled log-sum-exp of its children).
+    """
+    if isinstance(node, str):
+        out[node] = V[node]
+        return out[node]
+    name, lambda_key, children = node
+    lam = 1.0 if lambda_key is None else nest_lambdas[lambda_key]
+    child_u = np.array([_bottom_up_utility(c, V, nest_lambdas, out) for c in children])
+    scaled = child_u / lam
+    m = scaled.max()
+    u_node = lam * (m + np.log(np.sum(np.exp(scaled - m))))
+    out[node if isinstance(node, str) else id(node)] = u_node
+    return u_node
+
+
+def _top_down_shares(node, p_node, nest_lambdas, node_utils, shares):
+    """Pre-order pass: distributes p_node down to leaves via each node's own conditional softmax."""
+    if isinstance(node, str):
+        shares[node] = p_node
+        return
+    name, lambda_key, children = node
+    lam = 1.0 if lambda_key is None else nest_lambdas[lambda_key]
+    child_u = np.array([node_utils[c if isinstance(c, str) else id(c)] for c in children])
+    scaled = child_u / lam
+    exp_s = np.exp(scaled - scaled.max())
+    p_child = exp_s / exp_s.sum()
+    for c, p in zip(children, p_child):
+        _top_down_shares(c, p_node * p, nest_lambdas, node_utils, shares)
+
+
+def _shadow_price_shares(npv, caps, price_lambda, nest_lambdas, mu0=None, max_sweeps=300, max_bisect=40, tol=1e-5):
+    """
+    Solve for a shadow cost mu_p >= 0 per powertrain p such that the resulting nested-logit
     share of p never exceeds caps[p], with complementary slackness (mu_p > 0 only where the
     cap binds exactly): mu_p >= 0, share_p(mu) <= caps[p], mu_p * (caps[p] - share_p(mu)) == 0.
 
+    Shares are computed via NEST_TREE (module-level): a McFadden nested logit with utility
+    U_n = lambda_n * ln(sum_c exp(U_c / lambda_n)) feeding each node up to its parent (leaf
+    utility V_p = price_lambda * (npv_p - mu_p) at the bottom), and P(c|n) = exp(U_c/lambda_n)
+    / sum exp(U_c'/lambda_n) distributing probability back down. The root's scale is fixed at
+    1.0 (nothing sits above it to rescale against). This convention -- scaling the log-sum by
+    lambda_n before handing it to the parent, rather than passing a raw un-scaled inclusive
+    value up -- is what makes an all-lambda=1 tree collapse to exactly the flat softmax at any
+    depth (verified by hand and by verification/test_limits.py's
+    test_all_nest_lambdas_one_matches_flat_mnl): with every lambda=1, U_n = ln(sum_c exp(U_c))
+    so exp(U_n) = sum_c exp(U_c) exactly, which is precisely how a flat-MNL denominator builds
+    up recursively regardless of tree depth. A singleton nest (e.g. Electric = {be} alone) needs
+    no special case either -- U_n = lambda_n * ln(exp(V_be/lambda_n)) = V_be algebraically for
+    any lambda_n, so P(be|Electric) = 1 regardless of lambda_n's value.
+
     Replaces post-hoc clipping: a capped powertrain stays in the choice set at a discounted
     utility (price_lambda * (npv_p - mu_p)) instead of being removed with its excess demand
-    redistributed among the survivors. Under a single flat logit (no nesting), these two
-    mechanisms are provably equivalent -- IIA means the relative odds between any two
-    uncapped powertrains never depend on how a third powertrain's excess demand is
-    discouraged, only on the share it ends up with.
+    redistributed among the survivors. Removing it instead of discounting it would leak a wrong
+    (inflated) inclusive value up through its nest, distorting every sibling nest's share --
+    this is the actual reason shadow pricing exists once nesting is in play, even though under a
+    single flat logit (no nesting) clip-and-rerun and shadow pricing are provably equivalent by
+    IIA.
 
     Solved via Gauss-Seidel sweeps: one powertrain's shadow cost at a time, by bisection,
     holding every other powertrain's shadow cost fixed at its current value, cycling through
     all powertrains repeatedly until complementary slackness holds everywhere to within a
-    relative tolerance of tol -- every uncapped (mu == 0) leaf's share must not exceed its
-    cap, and every capped (mu > 0) leaf's share must equal its cap, not merely stay under it.
+    relative tolerance of tol (default 1e-5 -- 10x tighter than verification/snapshot.py's own
+    RTOL=1e-4 materiality threshold, so any leftover solver imprecision stays invisible to what
+    the project already treats as "a real change"; convergence doesn't need to be exact, just
+    tighter than what anything downstream can detect) -- every uncapped (mu == 0) leaf's share
+    must not exceed its cap, and every capped (mu > 0) leaf's share must equal its cap, not
+    merely stay under it.
     Checking only feasibility (share <= cap) is not enough: with a warm-started mu (see below),
     an early leaf in the sweep order can be judged against OTHER leaves' still-stale values and
     end up with an unwarranted mu > 0; once those other leaves are corrected later in the same
@@ -824,9 +916,13 @@ def _shadow_price_shares(npv, caps, price_lambda, mu0=None, max_sweeps=200, max_
     converge to exactly this kind of self-consistent-but-wrong point after a bad warm start).
     Bisection on a single
     coordinate (all else fixed) is used rather than a joint multi-dimensional Newton/fixed-
-    point step, because share_p(mu_p), holding everything else fixed, is strictly
-    monotonically decreasing in mu_p -- bisection can never overshoot or oscillate regardless
-    of how close a share is to saturating at 0 or 1. (A joint Newton step, by contrast, uses
+    point step, because share_p(mu_p), holding everything else fixed, is monotonically
+    non-increasing in mu_p -- bisection can never overshoot or oscillate regardless of how
+    close a share is to saturating at 0 or 1. This still holds under nesting: raising mu_p
+    strictly lowers leaf p's own utility, which strictly lowers its within-nest conditional
+    share and non-decreasingly lowers its nest's inclusive value relative to sibling nests: a
+    product of factors each non-decreasing (one strictly increasing) in that utility cannot
+    increase as the utility falls, at any tree depth. (A joint Newton step, by contrast, uses
     the local slope to extrapolate a step and badly overshoots once a share is near-saturated;
     when several powertrains in the same call are simultaneously and severely capped -- e.g.
     every nascent ZEV powertrain at once in an early year under a strong policy scenario --
@@ -840,18 +936,18 @@ def _shadow_price_shares(npv, caps, price_lambda, mu0=None, max_sweeps=200, max_
     powertrain has no lever either: with nothing left to redistribute demand to, its share is
     mechanically 1 regardless of its own cap, so bisection is skipped entirely in both cases.
 
-    npv, caps: dict powertrain -> value, same keys. mu0: optional dict powertrain -> initial
-    shadow cost, e.g. the converged result from a previous call with slightly different npv
-    (the ZEV-mandate credit-price bisection in Fleet._run calls this ~30 times per year with
-    only a small shift in npv each time as the credit price changes, so warm-starting from
-    the last converged mu turns most sweeps into a 0-1 iteration confirmation instead of a
-    search from scratch -- this changes nothing about the answer, since the fixed point
-    solved for doesn't depend on the starting guess, only how many sweeps it takes to reach
-    it). Returns (shares, mu): dict powertrain -> final share (sums to 1), and dict
-    powertrain -> converged shadow cost (for warm-starting a subsequent call).
+    npv, caps: dict powertrain -> value, same keys. nest_lambdas: dict nest name -> scale
+    (params.py: fleet.nest_lambdas), looked up via NEST_TREE's lambda_key at each node. mu0:
+    optional dict powertrain -> initial shadow cost, e.g. the converged result from a previous
+    call with slightly different npv (the ZEV-mandate credit-price bisection in Fleet._run
+    calls this ~30 times per year with only a small shift in npv each time as the credit price
+    changes, so warm-starting from the last converged mu turns most sweeps into a 0-1 iteration
+    confirmation instead of a search from scratch -- this changes nothing about the answer,
+    since the fixed point solved for doesn't depend on the starting guess, only how many sweeps
+    it takes to reach it). Returns (shares, mu): dict powertrain -> final share (sums to 1), and
+    dict powertrain -> converged shadow cost (for warm-starting a subsequent call).
     """
     powertrains = list(npv)
-    npv_arr  = np.array([npv[p] for p in powertrains])
     cap_arr  = np.array([caps[p] for p in powertrains])
     zero_cap = cap_arr <= 0.0
     if mu0 is None:
@@ -860,12 +956,27 @@ def _shadow_price_shares(npv, caps, price_lambda, mu0=None, max_sweeps=200, max_
         mu = np.array([max(0.0, mu0.get(p, 0.0)) for p in powertrains])
         mu[zero_cap] = 0.0
 
+    # Prune NEST_TREE down to whatever leaves are actually active for this call, once (zero_cap
+    # is fixed for the whole call). Names not present in NEST_TREE (e.g. synthetic test names)
+    # fall back to being bare root-level leaves -- since the root's own scale is fixed at 1.0,
+    # this reduces to exactly flat MNL among them, matching pre-nesting behavior for callers
+    # that don't use real powertrain names.
+    active_leaves = {powertrains[i] for i in range(len(powertrains)) if not zero_cap[i]}
+    known_active  = active_leaves & _NEST_TREE_LEAVES
+    pruned_known  = _prune_tree(NEST_TREE, known_active)
+    extra_leaves  = tuple(sorted(active_leaves - _NEST_TREE_LEAVES))
+    root_children = (pruned_known[2] if pruned_known else ()) + extra_leaves
+    pruned_tree   = ('root', None, root_children) if root_children else None
+
     def shares_at(mu_vec):
-        v = price_lambda * (npv_arr - mu_vec)
-        v = v - v.max()
-        exp_v = np.exp(v)
-        exp_v[zero_cap] = 0.0
-        return exp_v / exp_v.sum()
+        if pruned_tree is None:
+            return np.zeros(len(powertrains))
+        V = {p: price_lambda * (npv[p] - m) for p, m in zip(powertrains, mu_vec)}
+        node_utils = {}
+        _bottom_up_utility(pruned_tree, V, nest_lambdas, node_utils)
+        shares = {}
+        _top_down_shares(pruned_tree, 1.0, nest_lambdas, node_utils, shares)
+        return np.array([shares.get(p, 0.0) for p in powertrains])
 
     def share_of(idx, mu_p):
         mu_try = mu.copy()
@@ -950,6 +1061,7 @@ class Fleet:
                              for k in self.K}
         self.years        = np.arange(START_YEAR, END_YEAR + 1)
         self.price_lambda = float(self.params['fleet']['price_lambda'])
+        self.nest_lambdas = {k: float(v) for k, v in self.params['fleet']['nest_lambdas'].items()}
         self.policies     = policies
         self.foresight    = float(foresight)
 
@@ -1311,13 +1423,16 @@ class Fleet:
 
     def _calculate_market_share(self, k, t):
         """
-        Multinomial logit with production caps enforced via shadow pricing.
+        Nested logit (see NEST_TREE, module-level) with production caps enforced via shadow
+        pricing.
 
-        Unconstrained logit share for powertrain p:
-            share(p) = exp(lam x NPV(p)) / sum_q exp(lam x NPV(q))
-
-        where lam = price_lambda (controls sensitivity to NPV differences; higher lam -> winner-takes-
-        all, lam -> 0 -> uniform shares).
+        Leaf utility for powertrain p: V(p) = lam x NPV(p), where lam = price_lambda (controls
+        sensitivity to NPV differences; higher lam -> winner-takes-all, lam -> 0 -> uniform
+        shares within a nest). Nests (Liquid/Conventional/Hydrogen/Electric) aggregate leaf
+        utilities via their own scale parameters (self.nest_lambdas, from params.py:
+        fleet.nest_lambdas) before the resulting nest choice is itself made via the same
+        exp/sum-exp mechanics one level up -- see _shadow_price_shares's docstring for the exact
+        McFadden convention and why it reduces to flat MNL when every nest_lambdas value is 1.0.
 
         Production cap: nascent technologies cannot grow faster than their supply chain allows.
         _market_share_limit() returns the maximum achievable share given last year's share and
@@ -1344,7 +1459,7 @@ class Fleet:
             caps[p] = _market_share_limit(prev, float(vp['init_market_limit']), float(vp['cagr_nacent']), float(vp['cagr_mature']))
 
         mu0 = {p: self._mu_warm_start.get((k, p), 0.0) for p in self.P[k]}
-        shares, mu = _shadow_price_shares(npv, caps, self.price_lambda, mu0=mu0)
+        shares, mu = _shadow_price_shares(npv, caps, self.price_lambda, self.nest_lambdas, mu0=mu0)
         for p in self.P[k]:
             self.market_share[k, p, t] = shares[p]
             self._mu_warm_start[k, p]  = mu[p]

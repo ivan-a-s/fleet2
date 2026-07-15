@@ -12,7 +12,11 @@ for that value, or the value differs from what the paper shows.
 |---|---|---|---|
 | Growth rate (real) | 0.02 | % | Table 7 |
 | Private discount rate (real) | 0.08 | % | Table 7 |
-| Market sensitivity (lambda) | 3e-05 |  | Table 7 |
+| Market sensitivity (lambda) | 1e-05 - 3e-05 |  | UNREF -- assumption; Table 7 point estimate 0.00003 used as the upper bound, lower bound is not sourced |
+| Nest scale - Liquid | 0.7 | dimensionless | UNREF -- assumption |
+| Nest scale - Conventional | 0.4 | dimensionless | UNREF -- assumption |
+| Nest scale - Hydrogen | 0.6 | dimensionless | UNREF -- assumption |
+| Nest scale - Electric | 1.0 | dimensionless | UNREF -- assumption |
 | Activity (year 0) | 47361761620.2 | t-km | UNREF -- paper (Table 8) shows 48.9 Gt-km; check units |
 | Gravity | 9.81 | m/s2 | Table 7 |
 | Start year | 2025 |  | **UNREF** |
