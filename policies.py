@@ -96,9 +96,6 @@ class LCFS:
         arr[mask] = np.linspace(start_target, end_target, int(mask.sum()))
         self._target_arr = arr.astype(np.float32)
 
-    def set_baseline_fc(self, k, v):
-        pass   # kept for API compatibility with model.py; no longer used
-
     def apply(self, v):
         idx        = np.clip(v.operation_years - _YEAR0, 0, len(self._target_arr) - 1)
         target     = self._target_arr[idx]
@@ -128,9 +125,10 @@ class ZEVMandate:
     * target` (see `Fleet._apply_mandate_credit`).  The total collected from non-ZEVs is a
     pool; ZEVs are paid the same flat market rate for their own credits if the pool covers
     it, otherwise payouts ration down proportionally so total payout never exceeds the pool.
-    Net revenue is always >= 0: positive when ZEV supply is undersized relative to target
-    (the government collects non-compliance fees it can't fully redistribute), ~0 once ZEV
-    supply is abundant enough to exhaust the pool.
+    Net revenue is >= 0 at the bisection's converged fixed point: positive when ZEV supply is
+    undersized relative to target (the government collects non-compliance fees it can't fully
+    redistribute), ~0 once ZEV supply is abundant enough to exhaust the pool. See
+    Fleet._apply_mandate_credit for the exact tolerance/uniform-credits_per_vehicle caveats.
 
     credit_price(target, p_zev) is monotonically decreasing in p_zev, and the market's share
     response to price is monotonically non-decreasing, so their composition minus p_zev is

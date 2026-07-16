@@ -20,10 +20,12 @@ To do:
  - Proper verification of key parameters (fuel consumption).
 
  Nice to have (in order of priority):
+ - Alternate to hard production cap.
  - Add a resource-haul vehicle type.
  - Convervative behavioiur (favour incumbent).
  - Scale factors to relate cost to scale somehow.
  - Activity price elasticity.
+ - Check diesel LHV
  - Improve the battery accessory load estimation.
  - Variance in use (logit change like NREL).
  - Add autonomous vehicles again.
@@ -39,6 +41,7 @@ To do:
 
 """
 import os
+import math
 import warnings
 import numpy as np
 import copy
@@ -522,7 +525,7 @@ class Vehicles:
             return
 
         for a in self.age:
-            # Battery range degradation (1% per year of age + 0.01% per charge cycle)
+            # Battery range degradation (1% per year of age + 0.002% per charge cycle)
             if (battery_fuel and battery_fuel in self.fuel_consumption
                     and self.fuel_consumption[battery_fuel][a] > 0):
                 range_[a] = self.range[a] * max(0.0, 1.0 - deg_per_year * a - deg_per_cycle * cycles)
@@ -846,10 +849,15 @@ def _bottom_up_utility(node, V, nest_lambdas, out):
         return out[node]
     name, lambda_key, children = node
     lam = 1.0 if lambda_key is None else nest_lambdas[lambda_key]
-    child_u = np.array([_bottom_up_utility(c, V, nest_lambdas, out) for c in children])
-    scaled = child_u / lam
-    m = scaled.max()
-    u_node = lam * (m + np.log(np.sum(np.exp(scaled - m))))
+    # Plain-Python log-sum-exp (not np.array/.max()/np.sum/np.exp): every NEST_TREE node has
+    # only 1-7 children, and numpy's per-call dispatch overhead on arrays that small dwarfs the
+    # actual arithmetic -- this recurses ~3.6M times during a ZEV-mandate MC run, where that
+    # overhead was measured (cProfile, 2026-07) to be ~80% of total _shadow_price_shares runtime.
+    # Same math, bit-identical up to normal floating-point ULP noise (well inside the snapshot's
+    # 0.01% RTOL).
+    scaled = [_bottom_up_utility(c, V, nest_lambdas, out) / lam for c in children]
+    m = max(scaled)
+    u_node = lam * (m + math.log(sum(math.exp(s - m) for s in scaled)))
     out[node if isinstance(node, str) else id(node)] = u_node
     return u_node
 
@@ -861,15 +869,87 @@ def _top_down_shares(node, p_node, nest_lambdas, node_utils, shares):
         return
     name, lambda_key, children = node
     lam = 1.0 if lambda_key is None else nest_lambdas[lambda_key]
-    child_u = np.array([node_utils[c if isinstance(c, str) else id(c)] for c in children])
-    scaled = child_u / lam
-    exp_s = np.exp(scaled - scaled.max())
-    p_child = exp_s / exp_s.sum()
-    for c, p in zip(children, p_child):
-        _top_down_shares(c, p_node * p, nest_lambdas, node_utils, shares)
+    # Plain-Python softmax -- see _bottom_up_utility's comment on why (same tiny-array numpy
+    # overhead, same fix).
+    scaled = [node_utils[c if isinstance(c, str) else id(c)] / lam for c in children]
+    m      = max(scaled)
+    exp_s  = [math.exp(s - m) for s in scaled]
+    total  = sum(exp_s)
+    for c, e in zip(children, exp_s):
+        _top_down_shares(c, p_node * (e / total), nest_lambdas, node_utils, shares)
 
 
-def _shadow_price_shares(npv, caps, price_lambda, nest_lambdas, mu0=None, max_sweeps=300, max_bisect=40, tol=1e-5):
+def _leaf_ancestor_path(node, target):
+    """
+    Return a tuple of ancestor nodes (root first) from `node` down to (not including) the leaf
+    named `target`, or None if `target` is not in this subtree. Lets a single leaf's shadow-cost
+    bisection recompute only its own ancestor chain (_recompute_path_utilities/_path_share
+    below) instead of the whole tree on every probe.
+    """
+    if isinstance(node, str):
+        return () if node == target else None
+    name, lambda_key, children = node
+    for c in children:
+        sub = _leaf_ancestor_path(c, target)
+        if sub is not None:
+            return (node,) + sub
+    return None
+
+
+def _recompute_path_utilities(path, leaf, V_leaf, nest_lambdas, node_utils_cache):
+    """
+    Recompute bottom-up utility along `path` (ancestors of `leaf`, root first, from
+    _leaf_ancestor_path) given a trial utility V_leaf for `leaf`, reusing node_utils_cache for
+    every sibling not on the path -- valid since a sibling subtree's utility doesn't depend on
+    leaf's own mu. Returns a small dict {leaf: V_leaf, id(ancestor): new_utility, ...} WITHOUT
+    mutating node_utils_cache -- the caller decides whether to merge it in (a real commit, once
+    a leaf's shadow cost is finalised) or discard it (a bisection probe).
+    """
+    out = {leaf: V_leaf}
+    child_val, child_key = V_leaf, leaf
+    for node in reversed(path):
+        _, lambda_key, children = node
+        lam = 1.0 if lambda_key is None else nest_lambdas[lambda_key]
+        scaled = []
+        for c in children:
+            key = c if isinstance(c, str) else id(c)
+            u = child_val if key == child_key else node_utils_cache[key]
+            scaled.append(u / lam)
+        m = max(scaled)
+        u_node = lam * (m + math.log(sum(math.exp(s - m) for s in scaled)))
+        node_key = id(node)
+        out[node_key] = u_node
+        child_val, child_key = u_node, node_key
+    return out
+
+
+def _path_share(path, leaf, fresh_utils, node_utils_cache, nest_lambdas):
+    """
+    Top-down probability of `leaf`, using `fresh_utils` (from _recompute_path_utilities) for
+    nodes on `path` plus `leaf` itself, and node_utils_cache for every sibling encountered along
+    the way. Only ever touches `path`'s nodes and their immediate children -- never recurses
+    into a sibling's own subtree, since a sibling's already-cached aggregate utility is all
+    that's needed to normalise the softmax at each level.
+    """
+    p = 1.0
+    for depth, node in enumerate(path):
+        _, lambda_key, children = node
+        lam = 1.0 if lambda_key is None else nest_lambdas[lambda_key]
+        next_key = id(path[depth + 1]) if depth + 1 < len(path) else leaf
+        scaled, target_scaled = [], None
+        for c in children:
+            key = c if isinstance(c, str) else id(c)
+            u = fresh_utils[key] if key in fresh_utils else node_utils_cache[key]
+            s = u / lam
+            scaled.append(s)
+            if key == next_key:
+                target_scaled = s
+        m = max(scaled)
+        p *= math.exp(target_scaled - m) / sum(math.exp(s - m) for s in scaled)
+    return p
+
+
+def _shadow_price_shares(npv, caps, price_lambda, nest_lambdas, mu0=None, max_sweeps=2000, max_bisect=30, tol=1e-5):
     """
     Solve for a shadow cost mu_p >= 0 per powertrain p such that the resulting nested-logit
     share of p never exceeds caps[p], with complementary slackness (mu_p > 0 only where the
@@ -978,32 +1058,70 @@ def _shadow_price_shares(npv, caps, price_lambda, nest_lambdas, mu0=None, max_sw
         _top_down_shares(pruned_tree, 1.0, nest_lambdas, node_utils, shares)
         return np.array([shares.get(p, 0.0) for p in powertrains])
 
-    def share_of(idx, mu_p):
-        mu_try = mu.copy()
-        mu_try[idx] = mu_p
-        return shares_at(mu_try)[idx]
-
     active_idx = [i for i in range(len(powertrains)) if not zero_cap[i]]
     if len(active_idx) > 1:
+        cap_total = float(cap_arr[active_idx].sum())
+        if cap_total < 1.0 - 1e-6:
+            raise ValueError(
+                f"_shadow_price_shares: infeasible cap set -- active caps sum to "
+                f"{cap_total:.4f} < 1.0 for powertrains "
+                f"{[powertrains[i] for i in active_idx]}; no shadow cost can make shares sum "
+                f"to 1 while respecting every cap (check exclude_powertrains / "
+                f"init_market_limit for this combination). Failing fast rather than burning "
+                f"max_sweeps and returning a cap-violating result."
+            )
+
+        # Incremental bisection: a probe for leaf i used to call shares_at() -- a FULL tree
+        # evaluation -- on every single bisection step, including every OTHER leaf's nest,
+        # unaffected by leaf i's own mu. node_utils_cache holds every node's bottom-up utility,
+        # kept consistent with the CURRENT mu at all times (every leaf commits into it below,
+        # every sweep); a probe for leaf i only recomputes i's own ancestor chain
+        # (_leaf_ancestor_path/_recompute_path_utilities/_path_share), reusing the cache for
+        # every sibling instead of recomputing it. Measured (cProfile, 2026-07) to be the
+        # majority of remaining cost after the plain-Python log-sum-exp rewrite above, since one
+        # leaf's bisection makes up to max_bisect probes and this whole function is warm-started
+        # across ~30 ZEV-mandate calls/year -- see "Market-share allocation architecture" in
+        # CLAUDE.md.
+        leaf_path = {powertrains[i]: _leaf_ancestor_path(pruned_tree, powertrains[i]) for i in active_idx}
+        node_utils_cache = {}
+        V0 = {p: price_lambda * (npv[p] - m) for p, m in zip(powertrains, mu)}
+        _bottom_up_utility(pruned_tree, V0, nest_lambdas, node_utils_cache)
+
         for _ in range(max_sweeps):
             for i in active_idx:
-                if share_of(i, 0.0) <= cap_arr[i]:
+                p, path = powertrains[i], leaf_path[powertrains[i]]
+
+                def probe(mu_p, p=p, path=path):
+                    V_leaf = price_lambda * (npv[p] - mu_p)
+                    fresh = _recompute_path_utilities(path, p, V_leaf, nest_lambdas, node_utils_cache)
+                    return fresh, _path_share(path, p, fresh, node_utils_cache, nest_lambdas)
+
+                fresh0, s0 = probe(0.0)
+                if s0 <= cap_arr[i]:
                     mu[i] = 0.0
+                    node_utils_cache.update(fresh0)
                     continue
                 # Warm-start the bracket from this leaf's own previous-sweep value instead of
                 # always redoubling from 1.0 -- once a leaf's shadow cost is roughly right,
                 # later sweeps only need to nudge it, not rediscover its whole magnitude.
                 lo, hi = 0.0, mu[i] if mu[i] > 0.0 else 1.0
-                while share_of(i, hi) > cap_arr[i] and hi < 1e18:
+                fresh_hi, s_hi = probe(hi)
+                while s_hi > cap_arr[i] and hi < 1e18:
                     hi *= 2.0
+                    fresh_hi, s_hi = probe(hi)
                 for _ in range(max_bisect):
                     mid = 0.5 * (lo + hi)
-                    if share_of(i, mid) > cap_arr[i]:
+                    fresh_mid, s_mid = probe(mid)
+                    if s_mid > cap_arr[i]:
                         lo = mid
                     else:
-                        hi = mid
+                        hi, fresh_hi = mid, fresh_mid
                 mu[i] = hi
-            cur = shares_at(mu)
+                node_utils_cache.update(fresh_hi)
+
+            shares_dict = {}
+            _top_down_shares(pruned_tree, 1.0, nest_lambdas, node_utils_cache, shares_dict)
+            cur = np.array([shares_dict.get(p, 0.0) for p in powertrains])
             # Complementary slackness, checked properly: an UNCAPPED leaf (mu == 0) just needs
             # feasibility (share <= cap); a CAPPED leaf (mu > 0) must be tight -- its share must
             # equal its cap, not merely stay under it. Checking only feasibility here would miss
@@ -1024,12 +1142,31 @@ def _shadow_price_shares(npv, caps, price_lambda, nest_lambdas, mu0=None, max_sw
             if max_gap < tol:
                 break
         else:
-            warnings.warn(
+            raise RuntimeError(
                 f"_shadow_price_shares did not converge after {max_sweeps} sweeps "
-                f"(max cap/complementary-slackness gap {max_gap:.2e})"
+                f"(max cap/complementary-slackness gap {max_gap:.2e}). The cap set was already "
+                f"checked feasible (caps sum to >= 1), so this is genuine numerical "
+                f"non-convergence, not infeasibility -- investigate rather than letting a "
+                f"cap-violating result silently propagate into the ZEV-mandate bisection or a "
+                f"Monte Carlo run."
             )
 
-    shares = shares_at(mu)
+        # node_utils_cache is fully consistent with the final mu (every active leaf committed
+        # into it this sweep), so the final shares only need one more top-down pass -- no need
+        # to redo the bottom-up work shares_at() would otherwise repeat.
+        shares_dict = {}
+        _top_down_shares(pruned_tree, 1.0, nest_lambdas, node_utils_cache, shares_dict)
+        shares = np.array([shares_dict.get(p, 0.0) for p in powertrains])
+    else:
+        shares = shares_at(mu)
+
+    total = float(shares.sum())
+    if total < 1.0 - 1e-6:
+        warnings.warn(
+            f"_shadow_price_shares: all powertrains are zero-capped "
+            f"({[p for p, c in zip(powertrains, cap_arr) if c <= 0.0]}); returned shares sum "
+            f"to {total:.4f}, not 1.0."
+        )
     return (
         {p: float(s)  for p, s  in zip(powertrains, shares)},
         {p: float(mp) for p, mp in zip(powertrains, mu)},
@@ -1083,11 +1220,6 @@ class Fleet:
         self.revenue_per_tkm_history = {}  # (k, calendar_year) -> revenue_per_tkm applied that year
 
         self._build_initial_stock()
-        if self.policies and self.policies.lcfs:
-            for k in self.K:
-                # Build a temporary diesel vehicle at START_YEAR solely to extract
-                # baseline fuel consumption; not stored in self.vehicles.
-                self.policies.lcfs.set_baseline_fc(k, self._make_vehicle(k, 'dice', START_YEAR))
         self._run()
         self._aggregate()
 
@@ -1116,9 +1248,13 @@ class Fleet:
         payouts ration down proportionally so total payout never exceeds the pool:
             ration = min(1, pool / payout_if_full) = min(1, target * p_nonzev / p_zev)
             c_zev  = credits_per_vehicle[k] * credit_price * ration
-        Net revenue (pool - c_zev * N_zev) is always >= 0: positive when ZEVs are
-        undersupplied relative to target, ~0 once ZEV supply is abundant enough to exhaust
-        the pool.
+        Net revenue (pool - c_zev * N_zev) is >= 0 at the bisection's converged fixed point
+        (within its 1e-4 bracket-width tolerance -- ration is computed from the probe p_zev,
+        not the realized stock split, so it can drift marginally negative mid-search): positive
+        when ZEVs are undersupplied relative to target, ~0 once ZEV supply is abundant enough
+        to exhaust the pool. Also assumes credits_per_vehicle is uniform across k when
+        scope='fleet', since ration is computed once from the fleet-wide p_zev but applied with
+        each k's own credits_per_vehicle.
         """
         _mandate   = self.policies.zev_mandate
         p_nonzev   = max(1.0 - p_zev, 1e-9)

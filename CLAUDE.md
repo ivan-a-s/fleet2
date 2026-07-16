@@ -104,7 +104,7 @@ This compares 2236 fleet output values and reports any that shifted by more than
 - [x] `Fleet._aggregate()` — complete: total_stock, sales, fuel_usage, emissions, system_costs
 - [x] `plots/vehicle_plots.py` — per-cohort sanity checks; `plots/fleet_plots.py` — fleet-level line plots
 - [x] `policies.py` — `CarbonTax`, `GVWLExemption`, `LCFS`, `ZEVMandate`, `Policies` container; comparison plots in `plots/policy_plots/`
-- [x] `scenarios.py` — 6 named policy scenarios (`baseline`, `carbon_tax`, `lcfs`, `zev_mandate`, `gvwl`, `full_policy`)
+- [x] `scenarios.py` — 7 named policy scenarios (`baseline`, `carbon_tax`, `lcfs`, `lcfs_bc_eer`, `zev_mandate`, `gvwl`, `full_policy`)
 - [x] `run.py` — Monte Carlo runner: grouped sampling, parallel execution, KS convergence, `.npz` output
 
 ## Current model.py structure
@@ -129,7 +129,8 @@ Vehicles class:     _calculate_mass, _calculate_fuel_consumption,
                     _calculate_capital_cost, _calculate_annual_cost,
                     _discount, _calculate_tco_npv
 
-Fleet class:        _make_vehicle, _apply_mandate_credit, _build_initial_stock, _run,
+Fleet class:        _make_vehicle, _apply_mandate_credit, _build_initial_stock,
+                    _system_cost_per_tkm, _new_vehicle_cost_per_tkm, _run,
                     _calculate_market_share, _aggregate,
                     select_vehicle_params, realise_uncertainties
                     (self._mu_warm_start: (k, p) -> float, persists shadow costs across
@@ -139,6 +140,11 @@ Fleet class:        _make_vehicle, _apply_mandate_credit, _build_initial_stock, 
 Module functions:   _market_share_limit (production cap helper, unchanged),
                     _prune_tree, _bottom_up_utility, _top_down_shares (nested-logit
                     tree evaluator, called from inside _shadow_price_shares),
+                    _leaf_ancestor_path, _recompute_path_utilities, _path_share
+                    (single-leaf incremental tree evaluator, used by
+                    _shadow_price_shares's bisection instead of _bottom_up_utility/
+                    _top_down_shares to avoid re-evaluating unaffected sibling nests
+                    -- see "Performance" below),
                     _shadow_price_shares (shadow-price solver -- see below)
 ```
 
@@ -250,13 +256,56 @@ shadow cost across calls — both across the ZEV-mandate bisection's ~30 calls/y
 shift NPV slightly as the credit price changes) and across years. This changes nothing about the
 converged answer (still verified against the snapshot), only how many sweeps it takes to reach it.
 
-**Performance** (`Fleet(PARAMS, param_cps, policies=...)`, cp=0.5, vs. the pre-shadow-pricing
-waterfall): baseline/carbon_tax/lcfs/gvwl ~1.0–1.3 s (1.6–2.2× the old ~0.6 s), zev_mandate ~4 s
-(3.7×), full_policy (all four policies stacked, the worst case) ~10.6 s (9.7×, up from ~1.1 s).
-Still fine for Monte Carlo given policy scenarios also need fewer runs to converge, but worth
-knowing before assuming a `run.py` pass will take the same wall-clock time it used to.
+**Performance** (`Fleet(PARAMS, param_cps, policies=...)`, cp=0.5, directly measured not
+extrapolated): baseline 0.96 s, `zev_mandate` 3.86 s, `full_policy` 6.57 s (2026-07, current
+codebase). The `zev_mandate`/`full_policy` figures were previously found to be ~33 s /
+correspondingly higher (see git history) — an **8.4x** total speedup on `zev_mandate`
+(32.6 s -> 3.86 s), from three sequential fixes, all verified bit-compatible with the pre-change
+snapshot (2236/2236 within 0.01%):
 
-**Convergence tuning (`max_sweeps=300`, `tol=1e-5`):** originally `max_sweeps=200`, `tol=1e-7`.
+1. **Plain-Python log-sum-exp/softmax.** cProfile showed `_bottom_up_utility`/`_top_down_shares`
+   (the NEST_TREE evaluator) spending ~80% of runtime in numpy array-reduction overhead
+   (`np.array`/`.max()`/`np.sum`/`np.exp`) on per-node child arrays of only 1-7 elements, called
+   ~3.6M times across the ~300k `shares_at` evaluations one `zev_mandate` build makes. Numpy's
+   per-call dispatch overhead dwarfs the actual arithmetic at that array size. Rewrote both
+   functions with plain-Python `math.exp`/`math.log`/`max`/`sum` instead — 3.3x alone
+   (32.6 s -> 9.8 s).
+2. **Incremental bisection (avoid re-evaluating unaffected sibling nests).** `share_of`'s
+   bisection of one leaf's `mu` used to call `shares_at`, which re-evaluated the **entire** tree
+   on every probe (up to `max_bisect`=40 times per leaf), including sibling nests wholly
+   unaffected by that leaf's `mu`. Replaced with `node_utils_cache` (module-level
+   `_leaf_ancestor_path`/`_recompute_path_utilities`/`_path_share`): a persistent per-node
+   utility cache kept consistent with the current `mu` at all times (every leaf commits its
+   final value into it after its own bisection), so a probe only recomputes that leaf's own
+   ancestor chain (root -> ... -> leaf, typically 2-3 nodes) and reuses cached values for every
+   sibling — a further 2.2x (9.8 s -> 4.5 s). Profiling a **baseline** build (no mandate at all)
+   after fixes 1-2 showed `_shadow_price_shares` was still ~70% of total cost -- most non-`dice`
+   powertrains start nascent (`init_market_limit=0.02`), so multi-cap bisection is routine even
+   without an active mandate, not just under one.
+3. **`max_bisect` 40 -> 30.** 40 bisection iterations narrows the mu search interval by 2^40 --
+   far more precision than `tol=1e-5` needs. Tested 40/30/25/20: 20 broke (`RuntimeError`,
+   genuine non-convergence, confirming 40 wasn't pure padding); 25 and 30 both passed a 50-draw
+   stress test (40 baseline + 10 `zev_mandate` random draws, 0 failures each). Chose 30 over 25
+   for margin from the observed failure point at 20, trading a few points of speedup for
+   distance from a known failure mode -- ~10% further (4.5 s -> ~4.0 s on `zev_mandate`).
+
+Confirms this was **not** fundamentally a solver-convergence problem: `max_sweeps` (300 vs 2000)
+made zero measurable difference at median parameters before fix 1, and a 3x tolerance loosening
+only bought ~10% -- the cost was call-count x per-call overhead, not sweep count. `max_bisect`
+is a genuine (if narrow) precision/speed tradeoff, unlike fixes 1-2 which were pure "same math,
+faster" wins.
+
+A structurally different, much larger further win remains **unimplemented and undecided**:
+replacing the hard production-cap + shadow-pricing mechanism with a smooth acquisition-friction
+penalty computed from **prior-year** state only (`prev_share`, `cagr_nacent`, etc. -- all known
+before the year's logit runs, same pattern already used for `revenue_per_tkm`), which would
+eliminate the iterative bisection entirely rather than just speeding it up. This is a genuine
+re-specification of production-constraint economics (soft frictions vs. hard caps), not a
+performance refactor -- would need a defensible functional form/calibration, a deliberately
+re-saved snapshot (results should shift), and a validation pass against current trajectories
+before being implemented. Discussed 2026-07; not started.
+
+**Convergence tuning (`max_sweeps=2000`, `tol=1e-5`):** originally `max_sweeps=200`, `tol=1e-7`.
 Once `fleet.price_lambda` gained a `dist` (see "Key params.py fields to know"), the median run
 (cp=0.5) started drawing `price_lambda=0.00002` instead of the old fixed `0.00003`, and one
 early-year sleeper case (four powertrains simultaneously capped across three different nests —
@@ -265,11 +314,27 @@ early-year sleeper case (four powertrains simultaneously capped across three dif
 way (not the oscillation failure mode described above) — nesting adds an extra coupling channel
 between simultaneously-capped powertrains in *different* nests via their shared parent's inclusive
 value, on top of a lower `price_lambda` flattening the logit and requiring larger `mu` excursions
-to hit the same cap. Both changes are safe: `tol=1e-5` is still 10x tighter than
-`verification/snapshot.py`'s own `RTOL=1e-4` materiality threshold, so any leftover imprecision
-stays invisible to what the project already treats as "a real change"; `max_sweeps=300` is pure
-headroom (can't change the converged answer, only whether the loop reaches it in time) and costs
-nothing on the vast majority of calls that already converge in single digits via warm-starting.
+to hit the same cap. `tol=1e-5` is still 10x tighter than `verification/snapshot.py`'s own
+`RTOL=1e-4` materiality threshold, so any leftover imprecision stays invisible to what the project
+already treats as "a real change" -- **kept unchanged rather than loosened** (see below).
+`max_sweeps` is pure headroom (can't change the converged answer, only whether the loop reaches it
+in time) and costs nothing on the vast majority of calls that already converge in single digits
+via warm-starting.
+
+`max_sweeps=300` (the value chosen alongside the `1e-7`->`1e-5` change above) turned out to still
+be too tight once non-convergence was changed from a swallowed `warnings.warn` to a hard `raise`
+(2026-07 audit -- see "A real bug worth remembering" below for why silently returning a
+cap-violating result on non-convergence was itself the bug being fixed): a 30-random-draw
+reproduction across the full uncertainty space (not just `price_lambda`'s extremes) hit genuine
+non-convergence at `max_sweeps=300` in 1/30 trials (~3%), with gaps up to `8.17e-04` -- 8x
+*larger* than the snapshot's own `1e-4` materiality bar, i.e. large enough that silently accepting
+it (via a loosened `tol`) could have changed a downstream number the project would otherwise flag
+as real. Verified the gap is genuine slowness, not a harder failure: raising `max_sweeps` alone
+(no `tol` change) to 2000 cleared all 30 draws with zero non-convergence, confirming (as the
+solver's own monotonic-non-increasing proof predicts) these are legitimately slow-converging
+points, not oscillation or infeasibility -- more sweeps is strictly the correct lever here, since
+it preserves the existing 10x precision margin everywhere rather than trading it away just to
+paper over the rare slow case.
 
 **Verification sequence actually used** (worth repeating if this solver or the tree is touched
 again): (1) confirm the pre-change snapshot passes; (2) implement; (3) force all four
@@ -289,7 +354,7 @@ Two-phase hook interface called from `Fleet._make_vehicle()`:
 
 Endogenous policies (ZEV mandate) run in an outer convergence loop inside `Fleet._run()`, not via the hooks. Each vehicle sold is worth `credits_per_vehicle[k]` ZEV credits (default 2.5). `ZEVMandate.credit_price(target, p_zev)` is a smooth logistic function of the compliance gap (~`penalty_max` deep below target, collapsing toward 0 at/above target — no hard cliff). Since `credit_price(target, p_zev)` is monotonically decreasing in `p_zev` and the market's share response to price is monotonically non-decreasing, their composition minus `p_zev` is monotonic with at most one root — so the loop solves for the fixed point via **bisection on `p_zev` in `[0, 1]`** (probe the bracket midpoint, apply the implied price, measure the resulting ZEV share, narrow the bracket by comparison, repeat) rather than a damped linear blend. This is robust to how steep the credit-price transition is (a narrow transition band made a damped-blend version oscillate near the target; bisection doesn't, since it only ever uses the sign of the gap, not its magnitude). The mandate applies economic pressure and the market settles wherever the bracket converges; the loop is **not** a search that stops the instant the target is hit. Production-cap-bound years converge the same way (the bracket still narrows, just to a `p_zev` below target) — this is not a special case. Only warns on true numerical non-convergence (30-iteration limit without the bracket narrowing below `1e-4`). No cross-year warm-start (each year bisects the full `[0, 1]` range from scratch, ~14 iterations to converge) — this matches Paper 1 (`old/model_old.py:885-915`, which also resets its penalty search fresh every year) more closely than fleet2's previous warm-started version did. Paper 1's mechanism is a hinge-clamped linear formula with the same "only exit is the search variable stabilizing" property; this replaces the hinge with a smooth logistic and per-vehicle credits in place of a flat $/vehicle penalty.
 
-`Fleet._apply_mandate_credit(t, credit_price, target, p_zev, k=None)` writes the actual dollar amounts and is bounded so the government never pays out more than it collects. Non-ZEVs always owe a flat `credits_per_vehicle[k] * credit_price * target` (their own share of the obligation, independent of population split). The total collected from non-ZEVs is a pool; ZEVs are paid the flat market rate for their own credits (`credits_per_vehicle[k] * credit_price`) if the pool covers it, otherwise payouts ration down proportionally (`min(1, target * p_nonzev / p_zev)`) so total payout never exceeds the pool. Net revenue is always `>= 0` — positive when ZEV supply is undersized relative to target, `~0` once ZEV supply is abundant enough to exhaust the pool.
+`Fleet._apply_mandate_credit(t, credit_price, target, p_zev, k=None)` writes the actual dollar amounts and is bounded so the government never pays out more than it collects. Non-ZEVs always owe a flat `credits_per_vehicle[k] * credit_price * target` (their own share of the obligation, independent of population split). The total collected from non-ZEVs is a pool; ZEVs are paid the flat market rate for their own credits (`credits_per_vehicle[k] * credit_price`) if the pool covers it, otherwise payouts ration down proportionally (`min(1, target * p_nonzev / p_zev)`) so total payout never exceeds the pool. Net revenue is `>= 0` **at the bisection's converged fixed point** (within its `1e-4` bracket-width tolerance — `ration` is computed from the probe `p_zev`, not the realized stock split, so it can drift marginally negative mid-search) — positive when ZEV supply is undersized relative to target, `~0` once ZEV supply is abundant enough to exhaust the pool. This also assumes `credits_per_vehicle` is uniform across `k` under `scope='fleet'`, since `ration` is computed once from the fleet-wide `p_zev` but applied with each `k`'s own `credits_per_vehicle`.
 
 `COST_CATEGORIES` in `model.py` drives `_aggregate()`:
 ```python
@@ -299,7 +364,7 @@ COST_CATEGORIES = {
 }
 ```
 
-**LCFS calibration:** `baseline_fc[k]` is extracted from a throwaway START_YEAR diesel vehicle built in `Fleet.__init__` between `_build_initial_stock()` and `_run()`. This means LCFS has non-zero costs for diesel from 2025 onwards (target starts at 18.3%).
+**LCFS calibration:** `LCFS.apply()` computes cost per fuel directly from CI, EER, and LHV terms (see `policies.py`) — no baseline-diesel calibration step is needed. An earlier `set_baseline_fc` throwaway-vehicle mechanism (built once per `k` in `Fleet.__init__` solely to feed it) was removed as dead code in the 2026-07 audit once the LCFS formula moved to this energy-basis calculation; `set_baseline_fc` had already been a no-op for some time before that. LCFS has non-zero costs for diesel from 2025 onwards (target starts at 18.3%).
 
 **ZEV mandate scopes:**
 - `scope='fleet'` — ZEV share target applies across all k combined; `targets = {year_str: fraction}`
@@ -321,7 +386,7 @@ in `scenarios.py` like `targets`/`penalty`/`scope` — not calibrated params.py 
   (no `dist`), see "Market-share allocation architecture" above
 - `vehicles.components`: shared component defs (`converter`, `ess`, `transmission`) — each powertrain references these by type to avoid independent MC draws
 - Per-powertrain: `init_market_limit` (1.0 for dice, 0.02 for others), `cagr_nacent`, `cagr_mature`
-- Surrogate mapping: both `hice` and `dhice` reuse the `he` surrogate (all 5 drive cycles); `phe` only has `udds_hdt`/`cruise_hdt` (no haul-specific files)
+- Surrogate mapping: `hice` reuses the `he` surrogate (all 5 drive cycles); `dhice` reuses the `dice` surrogate, not `he` (`dhice` has no motor/battery, so it's modelled as a non-hybrid H2 ICE — `model.py: SURROGATE_NAME`); `phe` only has `udds_hdt`/`cruise_hdt` (no haul-specific files)
 - `hice` is modelled as a hybridised H2 ICE: motor (220 kW), battery (10/5/5 kWh), regen_efficiency=0.71, accessory_load=3400 — mirrors `he` component set with H2 tank instead of diesel tank
 
 ## params.py conventions
@@ -348,24 +413,47 @@ in `scenarios.py` like `targets`/`penalty`/`scope` — not calibrated params.py 
    Discovered along the way: widening `price_lambda`'s range exposed a slow (not oscillating)
    shadow-pricing convergence case at the low end, fixed by loosening `max_sweeps`/`tol` (see
    "Convergence tuning" above) rather than narrowing the range.
-2. Check total mass plausibility — sleeper diesel showing 28.9 t loaded (expect ~36-40 t)
-3. Verify `model.py` checked up to `_calculate_fuel_consumption` — remaining methods still need review
+2. ~~Check total mass plausibility~~ — **resolved, not a bug.** Sleeper diesel's 28.9 t is the
+   correct average *operating* mass at a 16 t payload (12,976 kg unloaded + 15,995 kg payload,
+   `model.py:263-291`); the truck's legal max is `gvwl=53,500 kg` (`params.py:563`). The "~36-40 t"
+   expectation in this item conflated legal GVW max with typical loaded mass — 36-40 t is a generic
+   fully-loaded US Class-8 figure (80,000 lb), not what this BC-specific spec should show at
+   average payload. Matches Paper 1 exactly (`old/model_old.py:42`, `old/data_old.py:275` ->
+   28,938 kg). Payload is age/drive-cycle-varying (16 t long-haul -> 10 t regional-haul past age 9,
+   `data.py:47-51`), which Paper 1 held constant across vehicle life — **confirmed intentional**
+   (user sign-off, 2026-07); `fleet.initial_activity` (`params.py:30`) was deliberately recalibrated
+   ~3% below its Table 8 point estimate as a consequence, same underlying sources.
+3. ~~Verify `model.py` checked up to `_calculate_fuel_consumption`~~ — **done.** `_calculate_range`
+   through `_calculate_tco_npv` (`model.py:400-818`) reviewed in full (exhaustive audit, 2026-07):
+   no critical/high correctness bugs, all unit-handling checks pass (mass kg-consistent, fuel-consumption
+   units match the surrogate, cost math doesn't mix $/vehicle/$/km/$/year, discounting applied
+   exactly once via `_discount_factor`). The low-severity items found (stale comment at
+   `model.py:525`; `diesel_tank.refuel_rate` unit label at `params.py:392`; `default_unloaded_mass`
+   at `params.py:562` 38 kg off from the summed diesel component mass) have since been fixed/flagged.
 4. Stage 4 policy improvements: dynamic LCFS credit pricing, ZEV purchase rebate, joint mandate+LCFS convergence (see `POLICY_PLAN.md`)
+5. Re-introduce autonomous vehicles (dropped from Paper 1's `AutonomousPermits` policy and the
+   `(1-autonomous_penetration)` driver-cost discount, `old/model_old.py:241-251,685`). Confirmed
+   future work (2026-07), not a regression — `fleet.autonomous_t50` (`params.py`) is currently
+   unused dead config until this lands.
 
 ## Performance notes
 
-Single `Fleet()` run takes ~0.6–1.3 s for baseline/carbon_tax/lcfs/gvwl, ~4 s for zev_mandate, and
-~10–11 s for full_policy (all four policies stacked) — see "Market-share allocation architecture"
-above for why policy scenarios with an active ZEV mandate got slower after shadow pricing replaced
-clipping, and how much. The dominant cost for scenarios without an active mandate is still
-constructing 543 `Vehicles` objects in `_run()` — inherent physics, not easily vectorised.
-Further optimisation opportunities (ZEV mandate loop, `activity_met` vectorisation) are documented
-in the `verification/profile_fleet.py` docstring under "Remaining optimisation opportunities".
+Single `Fleet()` run at cp=0.5 (2026-07 measurement, current codebase): ~1.1 s baseline, ~4.5 s
+`zev_mandate`, ~8.0 s `full_policy` — see "Market-share allocation architecture" above for the
+full root-cause (mandate-bisection call volume into the NEST_TREE evaluator) and the two fixes
+that brought `zev_mandate` down 7.3x from ~33 s. The dominant cost for scenarios without an active
+mandate is still constructing 543 `Vehicles` objects in `_run()` — inherent physics, not easily
+vectorised. Further optimisation opportunities (`activity_met` vectorisation; profiling ruled this
+out as the mandate-scenario bottleneck, but it's still a real, uninvestigated inefficiency — see
+`_run`'s inner bisection loop) are documented in the `verification/profile_fleet.py` docstring
+under "Remaining optimisation opportunities".
 
 Monte Carlo throughput with `run.py` at 8 workers: ~4–5× wall-clock speedup over serial.
 Baseline scenario (no policies, high distributional uncertainty) converges at ~3 000–4 000 runs
-with `--tol 0.05` (~8 min). Policy scenarios converge faster (~1 000–2 000 runs) because the
-mandate/tax constrains the ZEV adoption distribution.
+with `--tol 0.05` (~8 min). Policy scenarios converge faster in *run count* (~1 000–2 000 runs)
+because the mandate/tax constrains the ZEV adoption distribution; `zev_mandate`/`full_policy` runs
+are still individually more expensive than baseline (see per-run costs above) — factor that into
+wall-clock estimates for a large MC pass on either scenario rather than assuming baseline's cost.
 
 ## Monte Carlo architecture (`run.py` + `scenarios.py`)
 
@@ -397,7 +485,7 @@ cancelled (already in-flight workers finish naturally).
 - `emissions_{k}_use` / `emissions_{k}_supply` — fleet emissions
 - `system_costs_{k}_capital` / `system_costs_{k}_fuel` — cost spread
 
-**Output arrays** (82 series per scenario):
+**Output arrays** (82 per-year `(n, 26)` series per scenario, plus the scalar/mandate series below):
 
 | Key pattern | Shape | Content |
 |-------------|-------|---------|
@@ -407,6 +495,8 @@ cancelled (already in-flight workers finish naturally).
 | `emissions_{k}_{embodied\|supply\|use}` | (n, 26) | Fleet emissions (kgCO2e/yr) |
 | `system_costs_{k}_{category}` | (n, 26) | Annual costs ($/yr) |
 | `fuel_usage_{k}_{f}` | (n, 26) | Fuel consumed (L, kg, or kWh/yr) |
+| `npv_{k}_{p}_{y}` | (n,) | Per-vehicle NPV at cohort year `y` in {2030, 2040, 2050} — scalar per run, **not** a (n, 26) time series |
+| `mandate_penalty_frac` | (n, 26) | ZEV-mandate credit price / `penalty_max` per year — only present when a ZEV mandate policy is active |
 
 Plus one extra array, `_mc_cp_samples` (n, n_cols) — the raw `cp` draw used for each surviving
 run in each sample-matrix column, row-aligned with all series above via the same `iRun` order
@@ -428,6 +518,9 @@ cheap-to-run diagnostic for day-to-day development; a full Sobol'/Saltelli varia
 decomposition (needs its own A/B/AB sampling design, not the plain random draws here) is
 planned separately for pre-publication use and is not implemented.
 
-**Scenarios** (`scenarios.py`): `baseline`, `carbon_tax`, `lcfs`, `zev_mandate`, `gvwl`,
-`full_policy`. Policy numeric values (tax schedules, LCFS targets, ZEV mandate fractions) all
+**Scenarios** (`scenarios.py`): `baseline`, `carbon_tax`, `lcfs`, `lcfs_bc_eer`, `zev_mandate`,
+`gvwl`, `full_policy`. `lcfs_bc_eer` is `lcfs` re-run with the BC LCFS technical regulation's
+legislated Energy Effectiveness Ratios (`_EER_BC`) instead of the model-derived set (`_EER_MODEL`)
+used by `lcfs`/`full_policy` — a direct comparison of model-derived vs. regulatory EER assumptions.
+Policy numeric values (tax schedules, LCFS targets, ZEV mandate fractions) all
 live in `scenarios.py` — edit there without touching `run.py` or `model.py`.

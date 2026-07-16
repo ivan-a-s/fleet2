@@ -1,3 +1,34 @@
+"""
+Parameter definitions for the fleet2 HDT fleet adoption model.
+
+Every numeric leaf is wrapped in Param (P(...)): P(value, src="Author, Year", units="unit",
+notes="optional"). src=None or a string starting "UNREF --" flags a value without a paper
+citation (see CLAUDE.md "params.py conventions").
+
+Citation-integrity audit (2026-07, exhaustive read-only review of every leaf):
+
+- Leaves with src="UNREF -- ..." (already self-flagged inline, needs a citation):
+  fleet.initial_activity, fleet.price_lambda, fleet.nest_lambdas.{liquid,conventional,
+  hydrogen,electric}, fleet.revenue_markup, fuels.diesel.emissions_intensity.{supply,use},
+  vehicles.components.transmission.electric_transmission.efficiency, vehicles.costs.charger_50kw,
+  vehicles.types.sleeper.powertrains.hice.accessory_load, vehicles.types.straight.shared.drag_coef.
+
+- Leaves with src=None that are NOT annotated "model internal" (genuinely uncited, not yet
+  flagged inline): fleet.autonomous_t50, fleet.social_cost_of_carbon, fuels.{diesel,h2,h2_p,
+  h2_pe}.refuel_efficiency, fuels.{fast_charge,slow_charge,public_slow_charge}
+  .electricity_intensity, vehicles.components.ess.battery.{efficiency,efficiency_deg}.
+
+- Leaves with src=None annotated "model internal" / structural (deliberately uncited --
+  settings, unit-label strings, drive-cycle path strings, pollution_cost blocks,
+  init_market_limit, etc.) are not reproduced here; see each leaf's own notes= field.
+
+- Citation consistency flag (informational, no action taken -- do not silently correct):
+  fuels.diesel.lhv = 38.6 MJ/L is toward the high end / HHV-like for diesel volumetric LHV
+  (typical ~35.8-36.2); used self-consistently throughout, flagged for a source re-check only.
+
+This header is a point-in-time audit snapshot, not a live report -- re-run the audit rather
+than trusting it if params.py has changed materially since 2026-07.
+"""
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,8 +59,13 @@ PARAM_DICT = {
 
     "fleet": {
         "initial_activity":      P(47361761620.2, units="t-km",
-                                   src="UNREF -- paper (Table 8) shows 48.9 Gt-km; check units",
-                                   notes="National Research Council, 2010; NRCan, 2025; Statistics Canada, 2009"),
+                                   src="National Research Council, 2010; NRCan, 2025; Statistics Canada, 2009",
+                                   notes="Table 8 shows 48.9 Gt-km; this value is deliberately ~3% below that "
+                                         "point estimate -- recalibrated after payload became age/drive-cycle-"
+                                         "varying (see vehicles.types.*.shared.target_distance and data.py's "
+                                         "per-drive-cycle payload split) rather than held constant across "
+                                         "vehicle life as in Paper 1. Same underlying sources as before; "
+                                         "confirmed intentional, 2026-07 audit."),
         "activity_growth":       P(0.02,    src="Table 7"),
         "autonomous_t50":        P(2040,    notes="model uses 2040 point estimate; paper Table 10 shows triangular(2035,2040,2070) for scenario analysis"),
         "price_lambda":          P({"dist": "uniform", "min": 0.00001, "max": 0.00003},
@@ -389,7 +425,13 @@ PARAM_DICT = {
                     "specific_mass":        P(0.0,  notes="model internal; included in powertrain mass"),
                     "embodied_emissions":   P(0.0,  notes="model internal; included in powertrain mass"),
                     "usable_capacity":      P(0.95, notes="model internal"),
-                    "refuel_rate":          P(6000, units="L/min", notes="model internal"),
+                    "refuel_rate":          P(6000, units="L/hr",
+                                              notes="model internal; units corrected 2026-07 audit "
+                                                    "(was mislabeled L/min -- model.py's time-budget "
+                                                    "formula consumes this as a per-hour rate, "
+                                                    "consistent with h2 kg/hr and battery kWh/hr; "
+                                                    "value unchanged, dormant in practice since diesel "
+                                                    "range never binds the daily-distance constraint)"),
                 },
                 "battery": {
                     "specific_mass": P(
@@ -559,7 +601,14 @@ PARAM_DICT = {
                 "shared": {
                     "max_age":               P(25,         notes="model internal"),
                     "activity_proportion":   P(0.762745,   src="National Research Council, 2010; NRCan, 2025; Statistics Canada, 2009"),
-                    "default_unloaded_mass": P(12938,      units="kg", notes="model internal"),
+                    "default_unloaded_mass": P(12938,      units="kg",
+                                               notes="model internal; note: no longer exactly equal to the "
+                                                     "summed diesel component mass (frame + trailer + ice "
+                                                     "converter + transmission = 12,976 kg as of the "
+                                                     "component-based mass rewrite) -- a ~38 kg / 0.09% gap, "
+                                                     "so diesel's payload_frac is not exactly 1.0 anymore. "
+                                                     "Flagged 2026-07 audit; not corrected, since this is a "
+                                                     "calibrated value."),
                     "gvwl":                  P(53500,      src="COMT, 2019", units="kg",
                                                notes="Category 7: Truck - Full Trailer"),
                     "target_distance": P(
@@ -966,8 +1015,7 @@ PARAM_DICT = {
                         src="Statistics Canada, 2009"),
                     "frontal_area":       P(9.2,   src="National Academics, 2020", units="m2"),
                     "roll_coef":          P(0.0054, notes="model internal"),
-                    "frame_mass":         P(8600,  src="M. Wang et al., 2024", units="kg",
-                                            notes="day cab * 1.46 for box and liftgate"),
+                    "frame_mass":         P(8600,  src="M. Wang et al., 2024", units="kg"),
                     "trailer_mass":       P(0,     src="Table 13", notes="no trailer"),
                     "tire_mass":          P(291.38, src="Argonne GREET2, 2025 sleeper tire schedule (2068.38 kg) scaled by straight/sleeper survival-weighted lifetime distance ratio (0.235) x wheel-count ratio (6/10 = 0.6; 2 steer + 4 drive per GREET's Class 6 PnD Trucks vs sleeper's 2 + 8)",
                                             units="kg", notes="lifetime tire-replacement mass, not instantaneous physical mass"),

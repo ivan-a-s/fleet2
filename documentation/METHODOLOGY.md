@@ -19,9 +19,9 @@
    - 4.2 [Initial Stock](#42-initial-stock)
    - 4.3 [Year-by-Year Simulation](#43-year-by-year-simulation)
 5. [Market Share](#5-market-share)
-   - 5.1 [Multinomial Logit](#51-multinomial-logit)
+   - 5.1 [Nested Logit](#51-nested-logit)
    - 5.2 [Production Cap](#52-production-cap)
-   - 5.3 [Iterative Reallocation](#53-iterative-reallocation)
+   - 5.3 [Shadow Pricing](#53-shadow-pricing)
 6. [Policy Instruments](#6-policy-instruments)
    - 6.1 [Carbon Tax](#61-carbon-tax)
    - 6.2 [Low Carbon Fuel Standard (LCFS)](#62-low-carbon-fuel-standard-lcfs)
@@ -39,9 +39,9 @@
 <details>
 <summary><strong>1. Overview</strong></summary>
 
-A year-by-year fleet adoption simulation for Class 8 heavy-duty trucks (HDTs) in British Columbia, Canada, covering 2025--2050. The simulation tracks three vehicle types (sleeper, day cab, straight truck) across seven powertrains (diesel ICE, mild hybrid, plug-in hybrid, battery electric, fuel cell, hydrogen ICE hybrid, dual-fuel H2/diesel) and six fuel types.
+A year-by-year fleet adoption simulation for Class 8 heavy-duty trucks (HDTs) in British Columbia, Canada, covering 2025--2050. The simulation tracks three vehicle types (sleeper, day cab, straight truck) across seven powertrains (diesel ICE, mild hybrid, plug-in hybrid, battery electric, fuel cell, hydrogen ICE hybrid, dual-fuel H2/diesel) and seven fuel types.
 
-The model operates in three layers: (1) a **vehicle physics layer** that computes mass, fuel consumption, range, annual distance, emissions, and costs for each cohort (vehicle type, powertrain, model year); (2) a **fleet dynamics layer** that rolls surviving cohorts forward year by year and sizes new sales to meet an exogenous activity target; and (3) a **market share layer** that allocates new sales across powertrains via a multinomial logit with production constraints. Four policy instruments can be applied individually or in combination. A Monte Carlo wrapper propagates parametric uncertainty through all layers simultaneously.
+The model operates in three layers: (1) a **vehicle physics layer** that computes mass, fuel consumption, range, annual distance, emissions, and costs for each cohort (vehicle type, powertrain, model year); (2) a **fleet dynamics layer** that rolls surviving cohorts forward year by year and sizes new sales to meet an exogenous activity target; and (3) a **market share layer** that allocates new sales across powertrains via a nested logit with production constraints enforced through shadow pricing. Four policy instruments can be applied individually or in combination. A Monte Carlo wrapper propagates parametric uncertainty through all layers simultaneously.
 
 The simulation time step is one year. Each vehicle cohort is indexed by vehicle type $k$, powertrain $p$, and model year $y$; age $a = t - y$ tracks how old a cohort is in calendar year $t$.
 
@@ -65,7 +65,7 @@ All symbols are defined here and used consistently throughout. Symbols are subsc
 | $a \in A$ | Vehicle age in years, $A = \{0, \ldots, 24\}$; $a = t - y$ |
 | $k \in K$ | Vehicle type: sleeper, day\_cab, straight |
 | $p \in P$ | Powertrain: dice, he, phe, be, fc, hice, dhice |
-| $f \in F$ | Fuel: diesel, H2 (electrolysis / pyrolysis / electrified pyrolysis), electricity (slow charge / fast charge) |
+| $f \in F$ | Fuel: diesel, H2 (electrolysis / pyrolysis / electrified pyrolysis), electricity (depot slow charge / fast charge / public non-depot slow charge, e.g. sleeper PHE charging during a rest break) |
 | $d$ | Drive cycle label assigned to age $a$: long\_haul, regional\_haul, or short\_haul |
 
 ### Fleet Counts
@@ -179,12 +179,17 @@ All symbols are defined here and used consistently throughout. Symbols are subsc
 | Symbol | Units | Description | Sec. |
 |--------|-------|-------------|------|
 | $S_{k,p,t}$ | -- | Market share of powertrain $p$ for type $k$ in year $t$ | 5.1 |
-| $\lambda$ | \$$^{-1}$ | Logit price-sensitivity parameter | 5.1 |
+| $\lambda$ | \$$^{-1}$ | Logit price-sensitivity parameter (`price_lambda`) | 5.1 |
+| $n \in \mathcal{T}$ | -- | Nest in the powertrain nesting tree: Liquid, Conventional, Hydrogen, Electric, or the root | 5.1 |
+| $\ell_n$ | -- | Nest scale parameter (`nest_lambdas`); $\ell_n = 1$ collapses nest $n$ to a flat logit locally; root's scale is fixed at 1 | 5.1 |
+| $V_p$ | -- | Leaf utility of powertrain $p$: $\lambda\,(\text{NPV}_{k,p,t} - \mu_p)$ | 5.1, 5.3 |
+| $U_n$ | -- | Inclusive utility of nest $n$ (lambda-scaled log-sum-exp of its children) | 5.1 |
 | $\bar{S}_{k,p,t}$ | -- | Production cap: maximum achievable market share in year $t$ | 5.2 |
 | $S^{\text{init}}_{k,p}$ | -- | Initial market share floor for powertrain $p$ | 5.2 |
 | $S^*$ | -- | Threshold share separating the nascent from the mature supply growth regime | 5.2 |
 | $z^{\text{nac}}_{k,p}$ | -- | Nascent-phase annual supply growth rate (CAGR) for powertrain $p$ | 5.2 |
 | $z^{\text{mat}}_{k,p}$ | -- | Mature-phase annual supply growth rate (CAGR) for powertrain $p$ | 5.2 |
+| $\mu_p \geq 0$ | -- | Shadow cost applied to powertrain $p$'s NPV so its share respects $\bar{S}_{k,p,t}$ | 5.3 |
 
 ### Policy
 
@@ -194,15 +199,17 @@ All symbols are defined here and used consistently throughout. Symbols are subsc
 | $c^{\text{ct}}_t$ | \$/tCO2e | Carbon tax price in year $t$ | 6.1 |
 | $c^{\text{lcfs}}$ | \$/tCO2e | LCFS credit price | 6.2 |
 | $T^{\text{lcfs}}_t$ | -- | LCFS carbon intensity reduction target fraction in year $t$ | 6.2 |
-| $\text{CI}^{\text{diesel}}$ | kgCO2e/L | Combined supply and use emissions intensity of diesel | 6.2 |
-| $\bar{x}^{\text{diesel}}_k$ | L/km | Baseline diesel fuel consumption per km for type $k$, calibrated at $t_0$ | 6.2 |
-| $\text{CI}^{\text{base}}_k(t)$ | kgCO2e/km | Allowable carbon intensity for type $k$ in year $t$ | 6.2 |
-| $\text{CI}_{k,p,y,a}$ | kgCO2e/km | Actual carbon intensity of vehicle cohort $(k,p,y)$ at age $a$ | 6.2 |
+| $\text{CI}^{\text{diesel}}$ | kgCO2e/L | Fixed reference diesel emissions intensity (supply + use) used only to anchor the LCFS standard -- distinct from, and not synced to, the model's own (blended) $i^{\text{supply}}_{\text{diesel}}$/$i^{\text{use}}_{\text{diesel}}$ used elsewhere | 6.2 |
+| $\text{TCI}(t)$ | kgCO2e/J | Target carbon intensity per joule of fuel energy in year $t$ | 6.2 |
+| $\text{EER}_p$ | -- | Energy Effectiveness Ratio for powertrain $p$'s primary non-diesel fuel; diesel fuel always uses EER $=1$ regardless of $p$ | 6.2 |
 | $Z^{\text{tgt}}_t$ | -- | ZEV mandate target: required ZEV share of new sales in year $t$ | 6.3 |
-| $S^{\text{zev}}_t$ | -- | Achieved ZEV share of new sales in year $t$ | 6.3 |
-| $C^{\text{ZEVM}}_t$ | \$/vehicle | ZEV mandate penalty applied to non-ZEV new vehicles in year $t$ | 6.3 |
-| $\tilde{C}^{\text{ZEVM}}_t$ | \$/vehicle | ZEV mandate rebate applied to ZEV new vehicles in year $t$ | 6.3 |
-| $C^{\text{ZEVM,max}}$ | \$/vehicle | Maximum allowed penalty or rebate | 6.3 |
+| $p^{\text{zev}}$ | -- | Trial (bisection probe) ZEV share of new sales | 6.3 |
+| $S^{\text{zev}}_t$ | -- | Realised ZEV share of new sales in year $t$ once the bisection converges | 6.3 |
+| $c^{\text{credit}}(Z,p)$ | \$/credit | ZEV credit market price: a logistic function of the compliance gap $p^{\text{zev}} - Z$ | 6.3 |
+| $c^{\text{penalty,max}}$ | \$/credit | Ceiling credit price (asymptote as the compliance gap $\to -\infty$) | 6.3 |
+| $w$ | -- | Transition width: share-gap span over which $c^{\text{credit}}$ moves from $\sim$95\% to $\sim$5\% of $c^{\text{penalty,max}}$ | 6.3 |
+| $\rho_k$ | credits/vehicle | Credits earned or owed per vehicle of type $k$ (`credits_per_vehicle`) | 6.3 |
+| $\pi_t$ | -- | Payout rationing factor: fraction of full credit value actually paid to ZEVs in year $t$ | 6.3 |
 
 ### Monte Carlo
 
@@ -418,7 +425,7 @@ All cost terms are age-arrays over $a \in A$. Annual cost at age $a$ in calendar
 | FC replacement | $r^{\text{fc}}_a \cdot P^{\text{fc}}_{k,p} \cdot c^{\text{fc,rep}}_p(y+a)$ |
 | Carbon tax | see Section 6.1 |
 | LCFS | see Section 6.2 |
-| ZEV mandate | $C^{\text{ZEVM}}_t$ (non-ZEV) or $-\tilde{C}^{\text{ZEVM}}_t$ (ZEV) at $a = 0$ only; see Section 6.3 |
+| ZEV mandate | $C^{\text{nonZEV}}_t$ (non-ZEV) or $-C^{\text{ZEV}}_t$ (ZEV) at $a = 0$ only; see Section 6.3 |
 
 Annual revenue:
 
@@ -502,13 +509,37 @@ $$N_{k,p,t,t} = S_{k,p,t} \cdot \frac{\max\!\left(\mathcal{A}_k(t) - \hat{\mathc
 <details>
 <summary><strong>5. Market Share</strong></summary>
 
-### 5.1 Multinomial Logit
+### 5.1 Nested Logit
 
-New vehicle purchases are allocated across powertrains using a multinomial logit model. The unconstrained share of powertrain $p$ for vehicle type $k$ in year $t$ is:
+New vehicle purchases are allocated across powertrains using a McFadden nested logit, not a flat multinomial logit: powertrains are grouped into nests that share a family resemblance, so a shift between two similar options (e.g. diesel vs. mild hybrid) doesn't over-count relative to a shift toward a genuinely distinct alternative (e.g. battery electric). The nesting tree is fixed model structure, not a fitted or uncertain parameter:
 
-$$S_{k,p,t} = \frac{\exp\!\left(\lambda \cdot \text{NPV}_{k,p,t}\right)}{\displaystyle\sum_{p'} \exp\!\left(\lambda \cdot \text{NPV}_{k,p',t}\right)}$$
+```
+Liquid (l = 0.7)
+  Conventional (l = 0.4): dice, he
+  phe
+Hydrogen (l = 0.6): fc, hice, dhice
+Electric (l = 1.0): be
+```
 
-$\lambda$ controls price sensitivity. Higher values concentrate share on the highest-NPV option; as $\lambda \to 0$ shares become uniform.
+`dhice` (a 75%-diesel/25%-H2 dual-fuel ICE) sits in Hydrogen, not Liquid -- grouped by ZEV-adjacent substitution pattern rather than fuel share.
+
+**Leaf utility** of powertrain $p$ (before any production-cap shadow cost, Section 5.3):
+
+$$V_p = \lambda \left(\text{NPV}_{k,p,t} - \mu_p\right)$$
+
+**Inclusive utility**, bottom-up from leaves to root. For nest $n$ with children $c \in n$ and scale $\ell_n$:
+
+$$U_n = \ell_n \, \ln\!\left(\sum_{c \in n} \exp\!\left(U_c \,/\, \ell_n\right)\right)$$
+
+taking $U_c = V_c$ at leaves. The root's own scale is fixed at 1 (nothing sits above it to rescale against).
+
+**Conditional share**, top-down from root to leaves. Within nest $n$, the probability of choosing child $c$ given $n$ is chosen:
+
+$$P(c \mid n) = \frac{\exp\!\left(U_c \,/\, \ell_n\right)}{\displaystyle\sum_{c' \in n} \exp\!\left(U_{c'} \,/\, \ell_n\right)}$$
+
+and $S_{k,p,t}$ is the product of $P(c\mid n)$ down the path from root to leaf $p$.
+
+$\lambda$ controls overall price sensitivity; $\ell_n \to 0$ makes nest $n$'s members near-perfect substitutes (a shift mostly reallocates share *within* the nest), while $\ell_n = 1$ for every nest collapses the whole tree to exactly the flat multinomial logit, at any depth.
 
 ---
 
@@ -522,13 +553,15 @@ The denominator $(1 + \kappa)$ normalises for fleet growth so the cap governs sh
 
 ---
 
-### 5.3 Iterative Reallocation
+### 5.3 Shadow Pricing
 
-If any powertrain's unconstrained logit share exceeds its cap $\bar{S}_{k,p,t}$, that powertrain is fixed at its cap and the residual market
+Production caps are enforced by solving for a shadow cost $\mu_p \geq 0$ per powertrain such that the resulting nested-logit share never exceeds its cap, with complementary slackness (a cap is only "paid for" once it actually binds):
 
-$$1 - \sum_{\text{capped}} \bar{S}_{k,p,t}$$
+$$\mu_p \geq 0, \qquad S_{k,p,t}(\boldsymbol{\mu}) \leq \bar{S}_{k,p,t}, \qquad \mu_p \left(\bar{S}_{k,p,t} - S_{k,p,t}(\boldsymbol{\mu})\right) = 0$$
 
-is re-allocated by running the logit over the remaining unconstrained powertrains. This repeats until no new caps bind (convergence is reached within 10 iterations in all cases in practice).
+A capped powertrain stays in the choice set at a discounted utility ($V_p$ falls as $\mu_p$ rises) rather than being removed and having its excess demand redistributed among the survivors -- removal would leak an inflated inclusive value up through its nest and distort every sibling nest's share, which is precisely the failure mode nesting is meant to avoid.
+
+**Solved by Gauss-Seidel sweeps with per-powertrain bisection:** one powertrain's $\mu_p$ at a time, holding every other powertrain's $\mu$ fixed, cycling through all powertrains repeatedly until every capped powertrain's share is tight to its cap and every uncapped powertrain's share is feasible, to a relative tolerance of $10^{-5}$. Bisection (rather than a joint Newton step) is used because $S_{k,p,t}(\mu_p)$, holding everything else fixed, is monotonically non-increasing in $\mu_p$ -- bisection cannot overshoot regardless of how saturated a share is. A cap of exactly 0 permanently excludes that powertrain from the choice set for the call; a single remaining powertrain gets share 1 mechanically, with no cap check needed. $\mu_p$ is warm-started from its last-converged value across years and across the ZEV-mandate's repeated calls within a year (Section 6.3), which changes nothing about the converged answer, only how quickly it's reached.
 
 </details>
 
@@ -551,45 +584,41 @@ $c^{\text{ct}}_t$ is linearly interpolated between anchor years and set to zero 
 
 ### 6.2 Low Carbon Fuel Standard (LCFS)
 
-The LCFS penalises fuels with carbon intensity (CI) above an annually tightening standard and credits fuels below it.
+The LCFS penalises fuels with carbon intensity (CI) above an annually tightening, energy-basis standard and credits fuels below it. Unlike the fuel-and-vehicle-agnostic carbon tax, the LCFS standard is expressed per joule of energy delivered and adjusted per fuel by an Energy Effectiveness Ratio, crediting more-efficient energy carriers (e.g. electricity) even at equal combustion CI.
 
-**Allowable baseline CI** for vehicle type $k$ in year $t$:
+**Target carbon intensity per joule** in year $t$, anchored to a fixed reference diesel intensity $\text{CI}^{\text{diesel}}$ and diesel's own LHV $H_{\text{diesel}}$:
 
-$$\text{CI}^{\text{base}}_k(t) = \text{CI}^{\text{diesel}} \cdot \bar{x}^{\text{diesel}}_k \cdot \left(1 - T^{\text{lcfs}}_t\right)$$
+$$\text{TCI}(t) = \frac{\text{CI}^{\text{diesel}}}{H_{\text{diesel}}} \cdot \left(1 - T^{\text{lcfs}}_t\right)$$
 
-where $\text{CI}^{\text{diesel}}$ is the combined supply and use emissions intensity of diesel (kgCO2e/L), $\bar{x}^{\text{diesel}}_k$ is the baseline diesel fuel consumption per km for type $k$ calibrated from a diesel vehicle at $t_0$, and $T^{\text{lcfs}}_t$ is the CI reduction target interpolated linearly from $T^{\text{lcfs}}_{t_0}$ to $T^{\text{lcfs}}_{t_{\text{end}}}$.
+$T^{\text{lcfs}}_t$ is the CI reduction target, linearly interpolated from $T^{\text{lcfs}}_{t_0} = 0.183$ to $T^{\text{lcfs}}_{t_{\text{end}}} = 0.76$ and held at zero before $t_0$.
 
-**Actual CI** of a vehicle cohort at age $a$:
+**Annual LCFS cost**, summed over every fuel $f$ the vehicle consumes (negative values are credits):
 
-$$\text{CI}_{k,p,y,a} = \frac{\Gamma^{\text{supply}}_{k,p,y,a} + \Gamma^{\text{use}}_{k,p,y,a}}{d_{k,p,y,a}}$$
+$$C^{\text{lcfs}}_{k,p,y,a} = \frac{c^{\text{lcfs}}}{1000} \sum_f Q_{f,a} \cdot \left(i^{\text{supply}}_f + i^{\text{use}}_f - \text{TCI}(t) \cdot \text{EER}_{f,p} \cdot H_f\right)$$
 
-**Annual LCFS cost** (negative values are credits):
-
-$$C^{\text{lcfs}}_{k,p,y,a} = d_{k,p,y,a} \cdot \left(\text{CI}_{k,p,y,a} - \text{CI}^{\text{base}}_k(t)\right) \cdot \frac{c^{\text{lcfs}}}{1000}$$
+$\text{EER}_{f,p} = 1$ for diesel fuel regardless of powertrain; $\text{EER}_{f,p} = \text{EER}_p$ (powertrain-specific, e.g. higher for electricity/H2 than for liquid fuels) for every other fuel. A powertrain with no entry in the EER table defaults to 1 for all its fuels (diesel-equivalent treatment).
 
 ---
 
 ### 6.3 ZEV Mandate
 
-The mandate requires ZEV powertrains (battery electric, fuel cell, hydrogen ICE hybrid) to reach a target fraction $Z^{\text{tgt}}_t$ of new sales each year. It is enforced endogenously via a penalty/rebate applied at $a = 0$ to new vehicles in year $t$.
+The mandate requires ZEV powertrains (battery electric, fuel cell, hydrogen ICE hybrid) to reach a target fraction $Z^{\text{tgt}}_t$ of new sales each year. It is enforced endogenously via a credit market: each vehicle sold is worth $\rho_k$ credits, non-ZEVs owe their share of the compliance obligation, and ZEVs are paid for the credits they generate -- applied at $a = 0$ to new vehicles in year $t$.
 
-**Rebate balance.** The ZEV rebate is set so that aggregate penalty revenue approximately balances aggregate rebate expenditure:
+**Credit price.** A smooth logistic function of the compliance gap between the trial ZEV share $p^{\text{zev}}$ and the target -- near $c^{\text{penalty,max}}$ when deep below target, collapsing toward 0 at or above it, with no hard cliff:
 
-$$\tilde{C}^{\text{ZEVM}}_t = \min\!\left(C^{\text{ZEVM}}_t,\ C^{\text{ZEVM}}_t \cdot \frac{1 - S^{\text{zev}}_t}{\max\!\left(S^{\text{zev}}_t,\,\epsilon\right)}\right)$$
+$$c^{\text{credit}}(Z^{\text{tgt}}_t,\, p^{\text{zev}}) = \frac{c^{\text{penalty,max}}}{1 + \exp\!\left(k_\ell \left(p^{\text{zev}} - Z^{\text{tgt}}_t\right)\right)}, \qquad k_\ell = \frac{\ln 19}{w}$$
 
-Non-ZEV new vehicles incur $+C^{\text{ZEVM}}_t$ at $a = 0$; ZEV new vehicles receive $-\tilde{C}^{\text{ZEVM}}_t$ at $a = 0$.
+**Credit costs**, revenue-bounded so the government never pays out more than it collects. Non-ZEVs always owe their own flat share of the obligation:
 
-**Convergence loop.** Starting from a warm-start penalty carried from year $t - 1$, the penalty is updated via a damped proportional controller each iteration:
+$$C^{\text{nonZEV}}_t = \rho_k \cdot c^{\text{credit}}_t \cdot Z^{\text{tgt}}_t$$
 
-$$C^{\text{ZEVM,raw}} = C^{\text{ZEVM,max}} \cdot \frac{Z^{\text{tgt}}_t - S^{\text{zev}}_t}{\max\!\left(1 - S^{\text{zev}}_t,\,\epsilon\right)}$$
+The pool this raises is $C^{\text{nonZEV}}_t \cdot N^{\text{nonZEV}}$. ZEVs are paid the same flat market rate for their own credits if the pool covers it, otherwise payouts ration down proportionally so total payout never exceeds the pool:
 
-$$C^{\text{ZEVM},(n+1)} = \min\!\left(0.3\,C^{\text{ZEVM},(n)} + 0.7\,C^{\text{ZEVM,raw}},\ C^{\text{ZEVM,max}}\right)$$
+$$\pi_t = \min\!\left(1,\ Z^{\text{tgt}}_t \cdot \frac{1 - p^{\text{zev}}}{\max(p^{\text{zev}},\,\epsilon)}\right), \qquad C^{\text{ZEV}}_t = \rho_k \cdot c^{\text{credit}}_t \cdot \pi_t$$
 
-Oscillation (detected when the penalty reverses direction after iteration 5) is dampened by bisecting the update step:
+Non-ZEV new vehicles incur $+C^{\text{nonZEV}}_t$ at $a=0$; ZEV new vehicles receive $-C^{\text{ZEV}}_t$ at $a=0$. Net revenue is $\geq 0$ at the fixed point (within bisection tolerance): positive when ZEVs are undersupplied relative to target, $\approx 0$ once ZEV supply is abundant enough to exhaust the pool.
 
-$$C^{\text{ZEVM},(n+1)} \leftarrow \frac{C^{\text{ZEVM},(n)} + C^{\text{ZEVM},(n+1)}}{2}$$
-
-The loop exits when $S^{\text{zev}}_t \geq Z^{\text{tgt}}_t - 10^{-3}$, when the penalty converges (change $< \$1$, indicating the production cap is binding), or after 30 iterations.
+**Convergence loop.** $c^{\text{credit}}(Z^{\text{tgt}}_t, \cdot)$ is monotonically decreasing in $p^{\text{zev}}$, and the market's realised ZEV share responds monotonically non-decreasingly to a higher credit price, so their composition minus $p^{\text{zev}}$ is monotonic with at most one root. Solved by **bisection on $p^{\text{zev}} \in [0, 1]$** each year (no cross-year warm start -- each year starts fresh from $[0,1]$, matching how the reference Paper 1 model was run): probe the bracket midpoint, apply the implied credit price, run the nested-logit market-share step (Section 5) to measure the resulting ZEV share, narrow the bracket by comparison, repeat until the bracket width is below $10^{-4}$ or 30 iterations elapse. This is robust regardless of how steep the credit-price transition is, since it only ever uses the sign of the compliance gap, not its magnitude. Production-cap-bound years converge the same way, to whatever $p^{\text{zev}} < Z^{\text{tgt}}_t$ the market saturates at -- not a special case.
 
 ---
 
@@ -652,10 +681,11 @@ Convergence is declared when $D_{\text{KS}} < \tau_{\text{KS}}$ for all monitore
 |----------|----------------|
 | baseline | none |
 | carbon\_tax | Carbon tax |
-| lcfs | LCFS |
+| lcfs | LCFS, model-derived EER set |
+| lcfs\_bc\_eer | LCFS, BC LCFS technical regulation's legislated EER set (vs. model-derived) |
 | zev\_mandate | ZEV mandate |
 | gvwl | GVWL exemption |
-| full\_policy | All four |
+| full\_policy | Carbon tax + LCFS (model-derived EER) + ZEV mandate + GVWL exemption |
 
 </details>
 
@@ -689,6 +719,8 @@ $$\mathcal{Q}_{k,f,t} = \sum_p \sum_{y} N_{k,p,y,t} \cdot Q_{f,\,t-y}$$
 $$\mathcal{C}^{(j)}_{k,t} = \sum_p \sum_{y} N_{k,p,y,t} \cdot C^{(j)}_{k,p,y,\,t-y}$$
 
 Capital costs are attributed at the point of sale: capital cost in year $t$ is $\sum_p N_{k,p,t,t} \cdot C^{\text{capital}}_{k,p,t}$.
+
+Two further series are recorded directly, not aggregated: $\text{NPV}_{k,p,y}$ (Section 3.9) itself, for $y \in \{2030, 2040, 2050\}$, as a per-run scalar rather than an annual time series; and, for scenarios with an active ZEV mandate, the realised credit price relative to its ceiling, $c^{\text{credit}}_t \,/\, c^{\text{penalty,max}}$, per calendar year.
 
 Each aggregate is computed independently for every Monte Carlo run, producing a distribution over outcomes that reflects the full joint uncertainty across all uncertain parameters.
 
