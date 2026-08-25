@@ -21,18 +21,17 @@ To do:
 
  Nice to have (in order of priority):
  - Alternate to hard production cap.
- - Add a resource-haul vehicle type.
  - Convervative behavioiur (favour incumbent).
- - Scale factors to relate cost to scale somehow.
+ - Scale factors to relate cost to scale somehow (H2).
  - Activity price elasticity.
+ - Add a resource-haul vehicle type.
  - Check diesel LHV
  - Improve the battery accessory load estimation.
- - Variance in use (logit change like NREL).
  - Add autonomous vehicles again.
- - Nested logit (all diesel compete together).
  - Simplify params (one motor and then just change the mass with the powertrain etc.)
  - HDRD proportion may change over time. Make this possible (could be through CI distribution).
  - Sobol analysis.
+ - Variance in use (logit change like NREL).
  - Hotel load for sleepers and fridge units?
  - Make scrappage/usage decisions for vehicles?
 
