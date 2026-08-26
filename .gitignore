@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.pyo
+*.prof
 
 old/*
 !old/model_old.py

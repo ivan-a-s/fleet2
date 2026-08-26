@@ -181,7 +181,7 @@ All symbols are defined here and used consistently throughout. Symbols are subsc
 | $S_{k,p,t}$ | -- | Market share of powertrain $p$ for type $k$ in year $t$ | 5.1 |
 | $\lambda$ | \$$^{-1}$ | Logit price-sensitivity parameter (`price_lambda`) | 5.1 |
 | $n \in \mathcal{T}$ | -- | Nest in the powertrain nesting tree: Liquid, Conventional, Hydrogen, Electric, or the root | 5.1 |
-| $\ell_n$ | -- | Nest scale parameter (`nest_lambdas`); $\ell_n = 1$ collapses nest $n$ to a flat logit locally; root's scale is fixed at 1 | 5.1 |
+| $\lambda_n$ | -- | Nest scale parameter (`nest_lambdas`); $\lambda_n = 1$ collapses nest $n$ to a flat logit locally; root's scale is fixed at 1 | 5.1 |
 | $V_p$ | -- | Leaf utility of powertrain $p$: $\lambda\,(\text{NPV}_{k,p,t} - \mu_p)$ | 5.1, 5.3 |
 | $U_n$ | -- | Inclusive utility of nest $n$ (lambda-scaled log-sum-exp of its children) | 5.1 |
 | $\bar{S}_{k,p,t}$ | -- | Production cap: maximum achievable market share in year $t$ | 5.2 |
@@ -513,13 +513,7 @@ $$N_{k,p,t,t} = S_{k,p,t} \cdot \frac{\max\!\left(\mathcal{A}_k(t) - \hat{\mathc
 
 New vehicle purchases are allocated across powertrains using a McFadden nested logit, not a flat multinomial logit: powertrains are grouped into nests that share a family resemblance, so a shift between two similar options (e.g. diesel vs. mild hybrid) doesn't over-count relative to a shift toward a genuinely distinct alternative (e.g. battery electric). The nesting tree is fixed model structure, not a fitted or uncertain parameter:
 
-```
-Liquid (l = 0.7)
-  Conventional (l = 0.4): dice, he
-  phe
-Hydrogen (l = 0.6): fc, hice, dhice
-Electric (l = 1.0): be
-```
+![Nested logit tree: Root splits into Diesel, Hydrogen, and Electric nests; Diesel further splits into a Conventional sub-nest (DICE, HE) plus PHE; Hydrogen contains FC, HICE, DHICE; Electric contains BE. Each nest box shows its lambda.](figures/nested_logit_tree.png)
 
 `dhice` (a 75%-diesel/25%-H2 dual-fuel ICE) sits in Hydrogen, not Liquid -- grouped by ZEV-adjacent substitution pattern rather than fuel share.
 
@@ -527,19 +521,19 @@ Electric (l = 1.0): be
 
 $$V_p = \lambda \left(\text{NPV}_{k,p,t} - \mu_p\right)$$
 
-**Inclusive utility**, bottom-up from leaves to root. For nest $n$ with children $c \in n$ and scale $\ell_n$:
+**Inclusive utility**, bottom-up from leaves to root. For nest $n$ with children $c \in n$ and scale $\lambda_n$:
 
-$$U_n = \ell_n \, \ln\!\left(\sum_{c \in n} \exp\!\left(U_c \,/\, \ell_n\right)\right)$$
+$$U_n = \lambda_n \, \ln\!\left(\sum_{c \in n} \exp\!\left(U_c \,/\, \lambda_n\right)\right)$$
 
 taking $U_c = V_c$ at leaves. The root's own scale is fixed at 1 (nothing sits above it to rescale against).
 
 **Conditional share**, top-down from root to leaves. Within nest $n$, the probability of choosing child $c$ given $n$ is chosen:
 
-$$P(c \mid n) = \frac{\exp\!\left(U_c \,/\, \ell_n\right)}{\displaystyle\sum_{c' \in n} \exp\!\left(U_{c'} \,/\, \ell_n\right)}$$
+$$P(c \mid n) = \frac{\exp\!\left(U_c \,/\, \lambda_n\right)}{\displaystyle\sum_{c' \in n} \exp\!\left(U_{c'} \,/\, \lambda_n\right)}$$
 
 and $S_{k,p,t}$ is the product of $P(c\mid n)$ down the path from root to leaf $p$.
 
-$\lambda$ controls overall price sensitivity; $\ell_n \to 0$ makes nest $n$'s members near-perfect substitutes (a shift mostly reallocates share *within* the nest), while $\ell_n = 1$ for every nest collapses the whole tree to exactly the flat multinomial logit, at any depth.
+$\lambda$ controls overall price sensitivity; $\lambda_n \to 0$ makes nest $n$'s members near-perfect substitutes (a shift mostly reallocates share *within* the nest), while $\lambda_n = 1$ for every nest collapses the whole tree to exactly the flat multinomial logit, at any depth.
 
 ---
 
