@@ -34,6 +34,7 @@ To do:
  - Variance in use (logit change like NREL).
  - Hotel load for sleepers and fridge units?
  - Make scrappage/usage decisions for vehicles?
+ - PHEs and DHICE to refuel using diesel only if they run out en route and there isn't a break.
 
  Checked up to:
   - _calculate_fuel_consumption
@@ -521,6 +522,36 @@ class Vehicles:
                 if battery_cap > 0 and self._phe_cd_fc[a] > 0:
                     cycles += annual_cd * self._phe_cd_fc[a] * battery_refuel_eff / battery_cap
             self.range = electric_range
+            return
+
+        if self.p == 'dhice':
+            # Dual-fuel mode (75% diesel / 25% H2, concurrent) is driven until the 20 kg H2
+            # tank runs dry -- self.range already equals this point, since _calculate_range's
+            # min() over the two ESS collapses to the H2 tank's range (it binds tighter than
+            # the 500 L diesel tank at this split). The remainder of the day is driven
+            # diesel-only, at what the DICE surrogate would consume if 100% of that energy
+            # came from diesel -- recovered by scaling the existing dual-mode diesel rate back
+            # up by (d_prop+h_prop)/d_prop, since it was scaled down by d_prop/(d_prop+h_prop)
+            # in _split_surrogate_output. No degradation term: combustion tanks don't fade with
+            # age the way batteries do. As with PHE, the diesel-only tail is left uncapped
+            # (no mid-route-refuel-stop mechanic) since the diesel tank is large enough that
+            # this never binds in practice -- deliberately not modelled for now (2026-08).
+            dual_range = self.range.copy()
+            fp = self.params['fuels']
+            d_prop = fp.get('diesel', {}).get('proportion', 0.75)
+            h_prop = fp.get('h2',     {}).get('proportion', 0.25)
+            diesel_only_fc = self.fuel_consumption['diesel'] / (d_prop / (d_prop + h_prop))
+
+            self.annual_fuel = {'diesel': np.zeros(len(self.age)), 'h2': np.zeros(len(self.age))}
+            for a in self.age:
+                dual_daily   = min(daily_target[a], dual_range[a])
+                diesel_daily = max(0.0, daily_target[a] - dual_daily)
+                self.annual_distance[a]   = daily_target[a] * 5.0 / 7.0 * 365.0
+                annual_dual        = dual_daily   * 5.0 / 7.0 * 365.0
+                annual_diesel_only = diesel_daily * 5.0 / 7.0 * 365.0
+                self.annual_fuel['diesel'][a] = annual_dual * self.fuel_consumption['diesel'][a] + annual_diesel_only * diesel_only_fc[a]
+                self.annual_fuel['h2'][a]     = annual_dual * self.fuel_consumption['h2'][a]
+            self.range = dual_range
             return
 
         for a in self.age:
