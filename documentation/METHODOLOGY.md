@@ -81,6 +81,9 @@ All symbols are defined here and used consistently throughout. Symbols are subsc
 |--------|-------|-------------|------|
 | $M^{\text{frame}}_k$ | kg | Frame mass of vehicle type $k$ | 3.1 |
 | $M^{\text{trailer}}_k$ | kg | Trailer mass | 3.1 |
+| $M^{\text{tire}}_k$ | kg | Lifetime tire-replacement mass of vehicle type $k$ (not a physical mass; excluded from $M^{\text{unladen}}_{k,p}$) | 3.1, 3.6 |
+| $M^{\text{trailer\_tire}}_k$ | kg | Lifetime trailer-tire-replacement mass of vehicle type $k$ (same caveat; 0 for straight trucks) | 3.1, 3.6 |
+| $\mu^{\text{tire}}_k$ | kg/km | Combined tire-replacement mass per km: $(M^{\text{tire}}_k + M^{\text{trailer\_tire}}_k) / D^{\text{ref}}_k$ | 3.6 |
 | $M^{\text{conv}}_c$ | kg | Mass of converter or transmission component $c$ | 3.1 |
 | $M^{\text{spec}}_c$ | kg/unit | Specific mass of energy storage component $c$ per unit of capacity | 3.1 |
 | $X_c$ | unit | Capacity of energy storage component $c$ (kWh, kg H2, or L diesel) | 3.1 |
@@ -115,13 +118,18 @@ All symbols are defined here and used consistently throughout. Symbols are subsc
 | Symbol | Units | Description | Sec. |
 |--------|-------|-------------|------|
 | $u_c$ | -- | Usable capacity fraction of energy storage component $c$ | 3.3 |
-| $r$ | unit/h | Refuelling or recharging rate of the binding energy storage component | 3.3 |
-| $d^{\text{max}}_{c,a}$ | km | Range provided by energy storage component $c$ at age $a$ | 3.3 |
-| $d^{\text{max}}_a$ | km | Effective vehicle range at age $a$ (minimum over all energy storage components) | 3.3 |
+| $r$ | unit/h | Refuelling or recharging rate of the last scheme's binding energy storage component | 3.3 |
+| $S_p$ | -- | Number of driving schemes for powertrain $p$ (1 for single-mode; 2 for PHE, DHICE) | 3.3 |
+| $F_s$ | -- | Set of fuels consumed concurrently under scheme $s$ | 3.3 |
+| $\kappa_{s,a}(c)$ | unit | Usable capacity of component $c$ remaining at the start of scheme $s$, age $a$ | 3.3 |
+| $d^{(s)}_a$ | km | Range achievable on scheme $s$ given capacity remaining at that point | 3.3 |
+| $d^{(s),\text{used}}_a$ | km | Distance actually driven on scheme $s$ that day (incl. any stop-extension on the last scheme) | 3.4 |
+| $d^{\text{max}}_a$ | km | Effective vehicle range at age $a$ (all schemes driven back-to-back, no stop) | 3.3 |
 | $d^{\text{tgt}}_{k,a}$ | km/yr | Target annual distance at age $a$ for type $k$ | 3.4 |
 | $d^{\text{daily}}_{k,a}$ | km/day | Daily working-day distance target | 3.4 |
 | $d_{k,p,y,a}$ | km/yr | Actual annual distance achieved at age $a$ | 3.4 |
 | $d^{\text{en}}_a$ | km/yr | Annual distance driven via en-route fast charging | 3.4 |
+| $D^{\text{ref}}_k$ | km | Reference lifetime distance for type $k$: $\sum_a d^{\text{tgt}}_{k,a}$ over all ages, undiscounted | 3.6 |
 | $\xi$ | yr$^{-1}$ | Battery capacity fade per year of age | 3.4 |
 | $\theta$ | cycle$^{-1}$ | Battery capacity fade per charge cycle | 3.4 |
 | $N^{\text{cyc}}_a$ | cycles | Cumulative charge cycles accumulated to age $a$ | 3.4 |
@@ -239,6 +247,8 @@ $$M^{\text{unladen}}_{k,p} = M^{\text{frame}}_k + M^{\text{trailer}}_k + \sum_c 
 
 where $M_c = M^{\text{conv}}_c$ for converters and transmissions, and $M_c = M^{\text{spec}}_c \cdot X_c$ for energy storage components.
 
+$M^{\text{unladen}}_{k,p}$ deliberately excludes tires. $M^{\text{frame}}_k$/$M^{\text{trailer}}_k$ are sourced as one-time material composition (the truck and trailer as built, including their first set of tires), not GREET's own per-lifetime component total, which bundles tire *replacements* into the chassis figure. $M^{\text{tire}}_k$/$M^{\text{trailer\_tire}}_k$ (Section 3.6) instead carry only the lifetime tire-*replacement* mass, kept out of $M^{\text{unladen}}_{k,p}$ for two reasons: they would double-count the tires already embedded in $M^{\text{frame}}_k$/$M^{\text{trailer}}_k$, and — since Section 3.6 converts them into a per-km emissions rate rather than treating them as a static mass — there is no meaningful "instantaneous mass" they could contribute to the vehicle's laden weight or payload-penalty calculation in the first place.
+
 **Payload penalty.** A heavier drivetrain displaces payload on weight-limited loads. The payload fraction is:
 
 $$\nu_{k,p} = \max\!\left(0,\ 1 - \omega_k \left(1 - \frac{M^{\text{GVWL}}_k + \Delta M^{\text{GVWL}}_k - M^{\text{unladen}}_{k,p}}{M^{\text{GVWL}}_k - \bar{M}^{\text{unladen}}_k}\right)\right)$$
@@ -292,6 +302,8 @@ $$x^{\text{CD}}_{\text{charge},a} = \hat{x}^{\text{be}}_{d_a}\!\left(\eta_{\text
 
 Annual fuel quantities for the PHE are computed in Section 3.4 from these per-km values and the electric range available at each age.
 
+Annual fuel quantities for the DHICE are computed in Section 3.4 similarly, from the dual-fuel per-km values above and the dual-fuel range available at each age.
+
 #### 3.2.3 Refuelling Efficiency Adjustment
 
 The surrogate is trained on vehicle energy demand in tank or battery units. Fuel costs and emissions are quoted per source unit (grid kWh at the meter, kg H2 at the pump). The gross-up from tank-side to source units is:
@@ -304,13 +316,15 @@ For fuels where $\eta^{\text{fill}}_f = 1$ (diesel, H2) this has no effect.
 
 ### 3.3 Range
 
-The effective vehicle range is the binding energy-storage constraint across all components. For each energy storage component $c$ associated with fuel $f_c$:
+Every powertrain drives through an ordered sequence of $S_p$ **schemes** -- a scheme is a set of fuels consumed concurrently at a fixed per-km rate, representing one driving mode. $S_p = 1$ for dice, he, be, fc, and hice (a single mode for the vehicle's whole life). $S_p = 2$ for the two multi-mode powertrains: PHE drives electric (scheme 1) then diesel (scheme 2); DHICE drives dual-fuel diesel+H2 (scheme 1) then diesel-only (scheme 2). This unifies what used to be three separate mechanisms (a generic single-fuel one plus a hand-written PHE and DHICE case) into one: a single-scheme vehicle is just the $S_p=1$ special case of the same walk.
 
-$$d^{\text{max}}_{c,a} = \frac{X_c \cdot u_c}{\tilde{x}_{f_c,a}}$$
+Each energy storage component $c$ starts the day at its full usable capacity $X_c u_c$ (reduced by fade first, if $c$ is the battery -- Section 3.4). Schemes are driven in order; a component drawn on by more than one scheme (DHICE's diesel tank, used by both schemes) carries into the next scheme whatever capacity the previous one left in it, rather than starting that scheme with a full tank. Within scheme $s$, the range achievable on the capacity remaining at that point is the binding constraint across the scheme's fuels:
 
-$$d^{\text{max}}_a = \min_c\, d^{\text{max}}_{c,a}$$
+$$d^{(s)}_a = \min_{f \in F_s} \frac{\kappa_{s,a}(c_f)}{\tilde{x}_{f,a}}$$
 
-The binding component also determines the refuelling rate $r$ used in Section 3.4. For batteries, $r$ is the fast-charger wall power multiplied by the fast-charging efficiency (kW delivered to the battery). For H2 tanks, $r$ is pump flow in kg/h.
+where $\kappa_{s,a}(c)$ is component $c$'s usable capacity remaining at the start of scheme $s$, and $c_f$ is the component backing fuel $f$. The vehicle's **effective range** $d^{\text{max}}_a$ is the total distance driven across all $S_p$ schemes back-to-back on a full tank of everything, with no refuelling stop: scheme 1 drives $d^{(1)}_a$, depleting whatever capacity it shares with later schemes; scheme 2 then computes its own $d^{(2)}_a$ against what's left; and so on. For a single-scheme powertrain this is just $d^{\text{max}}_a = d^{(1)}_a$, identical to the flat "min over components" rule this generalises. For PHE and DHICE, $d^{\text{max}}_a$ is now genuinely the **combined** range across every onboard energy source (e.g. electric range plus the diesel tank's own range for PHE) rather than only the first scheme's range -- previously the model treated the second scheme's tank as having unlimited range (see below).
+
+The **last** scheme's binding component also determines the refuelling rate $r$ used in Section 3.4 -- only the last scheme may be extended by a stop; earlier schemes simply run out and hand off to the next scheme, matching how a vehicle actually switches driving mode (e.g. PHE going electric $\to$ diesel) rather than stopping mid-mode to top up. For batteries, $r$ is the fast-charger wall power multiplied by the fast-charging efficiency (kW delivered to the battery). For H2/diesel tanks, $r$ is pump/nozzle flow (kg/h or L/h).
 
 ---
 
@@ -320,35 +334,29 @@ The binding component also determines the refuelling rate $r$ used in Section 3.
 
 $$d^{\text{daily}}_{k,a} = \frac{d^{\text{tgt}}_{k,a}}{365} \cdot \frac{7}{5}$$
 
-**Battery degradation.** Before the range check each year, the effective range is reduced by capacity fade:
+**Battery degradation.** Before either scheme walk in a given age, the battery's remaining capacity (if any scheme uses it) is reduced by capacity fade:
 
-$$d^{\text{max}}_a \leftarrow d^{\text{max}}_a \cdot \max\!\left(0,\ 1 - \xi \cdot a - \theta \cdot N^{\text{cyc}}_a\right)$$
+$$\kappa_{s,a}(\text{battery}) \leftarrow X_{\text{battery}} u_{\text{battery}} \cdot \max\!\left(0,\ 1 - \xi \cdot a - \theta \cdot N^{\text{cyc}}_a\right)$$
 
-where $N^{\text{cyc}}_a$ accumulates year-by-year as:
+where $N^{\text{cyc}}_a$ accumulates year-by-year from the battery-fuel quantity actually consumed that age, normalised against the battery's raw nameplate capacity $X_{\text{battery}}$ (not the usable capacity $X_{\text{battery}} u_{\text{battery}}$ used for range):
 
-$$N^{\text{cyc}}_a \leftarrow N^{\text{cyc}}_{a-1} + \frac{d_{k,p,y,a-1} \cdot \tilde{x}_{\text{charge},a-1} \cdot \eta^{\text{fill}}_{\text{charge}}}{X_{\text{battery}}}$$
+$$N^{\text{cyc}}_a \leftarrow N^{\text{cyc}}_{a-1} + \frac{Q_{\text{charge},a-1} \cdot \eta^{\text{fill}}_{\text{charge}}}{X_{\text{battery}}}$$
 
-**Range check and time-budget refuelling.** If $d^{\text{daily}}_{k,a} \leq d^{\text{max}}_a$, the vehicle drives the full daily target. Otherwise, extra distance is achieved via a refuelling or recharging stop. The time that would have been spent driving the unmet shortfall is available for the stop. Solving simultaneously for stop duration and extra distance achievable within that time budget:
+**Driving the day.** Each age is walked through the scheme sequence twice: once with an unlimited target and no stop, to get $d^{\text{max}}_a$ (Section 3.3); once against the actual daily target $d^{\text{daily}}_{k,a}$, with the last scheme allowed to extend past its own range via a refuelling/recharging stop. For each scheme $s = 1, \ldots, S_p$ in order, the vehicle drives $\min(d^{\text{remain}}_a,\, d^{(s)}_a)$ km on that scheme (where $d^{\text{remain}}_a$ is what's left of the daily target after earlier schemes), consuming each of its fuels at that scheme's own rate, and depleting any shared component's remaining capacity accordingly -- **except** on the last scheme, where a shortfall past $d^{(S_p)}_a$ triggers the time-budget refuelling formula below instead of simply stopping there. This is exactly today's PHE/DHICE behaviour (drive scheme 1 until it runs out, then scheme 2 for the remainder) plus one addition: scheme 2's own tank capacity is now actually checked (previously assumed unlimited -- see below) rather than left uncapped.
 
-$$d^{\text{extra}}_a = \max\!\left(0,\ \frac{\left(\dfrac{d^{\text{daily}}_{k,a} - d^{\text{max}}_a}{v_{k,a}} - 0.25\right) \cdot v_{k,a} \cdot r}{\tilde{x}_{f,a} \cdot v_{k,a} + r}\right)$$
+**Time-budget refuelling (last scheme only).** If the daily target is met within the last scheme's own range, no stop is needed. Otherwise, extra distance is achieved via a stop; the time that would have been spent driving the unmet shortfall is available for it. Solving simultaneously for stop duration and extra distance achievable within that time budget, using the last scheme's own binding fuel $f$ and range $d^{(S_p)}_a$:
 
-where $0.25$ h is a fixed per-stop overhead and $f$ is the fuel of the binding energy storage component. The achievable daily distance is $d^{\text{max}}_a + d^{\text{extra}}_a$.
+$$d^{\text{extra}}_a = \max\!\left(0,\ \frac{\left(\dfrac{d^{\text{remain}}_a - d^{(S_p)}_a}{v_{k,a}} - 0.25\right) \cdot v_{k,a} \cdot r}{\tilde{x}_{f,a} \cdot v_{k,a} + r}\right)$$
 
-**Annual distance** (converting back to calendar-year basis):
+where $0.25$ h is a fixed per-stop overhead. This is unchanged from before for single-scheme powertrains; for PHE and DHICE it is a genuinely new capability -- the diesel tail was previously assumed to always cover any shortfall outright. In practice this remains numerically inactive for both: the diesel tank's own range comfortably exceeds any realistic shortfall left after the first scheme, so the formula above is never actually invoked at real parameter values, and every scenario output is unchanged. It only activates as a structural safeguard (verified by artificially shrinking the diesel tank in testing), so that a future parameter change can never silently assume infinite diesel range.
 
-$$d_{k,p,y,a} = \left(d^{\text{max}}_a + d^{\text{extra}}_a\right) \cdot \frac{5}{7} \cdot 365$$
+**Annual distance and fuel** (converting back to calendar-year basis, summing each fuel's consumption across whichever schemes used it that day):
 
-$$d^{\text{en}}_a = d^{\text{extra}}_a \cdot \frac{5}{7} \cdot 365$$
+$$d_{k,p,y,a} = \left(\textstyle\sum_{s} d^{(s),\text{used}}_a\right) \cdot \frac{5}{7} \cdot 365, \qquad d^{\text{en}}_a = d^{\text{extra}}_a \cdot \frac{5}{7} \cdot 365$$
 
-**PHE annual fuel.** At each age the vehicle drives in CD mode up to the available electric range, then switches to CS mode for the remainder:
+$$Q_{f,a} = \left(\textstyle\sum_{s\,:\,f \in F_s} d^{(s),\text{used}}_a \cdot \tilde{x}_{f,a}\right) \cdot \frac{5}{7} \cdot 365$$
 
-$$d^{\text{CD}}_a = \min\!\left(d^{\text{daily}}_{k,a},\ d^{\text{max,elec}}_a\right), \qquad d^{\text{CS}}_a = \max\!\left(0,\ d^{\text{daily}}_{k,a} - d^{\text{CD}}_a\right)$$
-
-$$Q^{\text{CD}}_{\text{charge},a} = d^{\text{CD}}_a \cdot \tfrac{5}{7} \cdot 365 \cdot \tilde{x}^{\text{CD}}_{\text{charge},a}, \qquad Q^{\text{CS}}_{\text{diesel},a} = d^{\text{CS}}_a \cdot \tfrac{5}{7} \cdot 365 \cdot \tilde{x}^{\text{CS}}_{\text{diesel},a}$$
-
-**Annual fuel (non-PHE):**
-
-$$Q_{f,a} = d_{k,p,y,a} \cdot \tilde{x}_{f,a}$$
+where $d^{(s),\text{used}}_a$ is the distance actually driven on scheme $s$ that day (including any $d^{\text{extra}}_a$ on the last scheme). For a single-scheme powertrain this collapses to the familiar $d_{k,p,y,a} = \left(d^{\text{max}}_a + d^{\text{extra}}_a\right) \cdot \tfrac{5}{7}\cdot 365$ and $Q_{f,a} = d_{k,p,y,a}\cdot\tilde{x}_{f,a}$. For DHICE, the diesel-only tail (scheme 2) is driven at the fuel rate the DICE surrogate would give if 100% of the energy came from diesel, recovered by inverting the DHICE fuel split (Section 3.2.2) back to its raw, undivided rate: $x^{\text{diesel-only}}_a = \tilde{x}_{\text{diesel},a} \big/ \big(\phi_{\text{diesel}} / (\phi_{\text{diesel}} + \phi_{\text{H2}})\big)$.
 
 **En-route fast charging split (BETs).** When a battery-electric truck extends range via an en-route DC fast charger, that portion of energy is re-billed at fast-charge rates because the same battery energy incurs higher grid losses than at a depot AC charger:
 
@@ -374,11 +382,17 @@ Replacement events enter the embodied emission and cost calculations at their ac
 
 ### 3.6 Emissions
 
-**Embodied emissions.** Manufacturing emissions are attributed at age 0; fuel cell stack replacements add further embodied emissions at their actual replacement ages:
+**Embodied emissions.** Manufacturing emissions are attributed at age 0, plus two replacement streams: fuel cell stack replacements at their actual replacement ages, and tire replacements spread across every age in proportion to distance driven:
 
-$$\Gamma^{\text{emb}}_{k,p,y,a} = \begin{cases} \left(M^{\text{frame}}_k + \zeta_k \cdot M^{\text{trailer}}_k\right) i^{\text{emb}}_{\text{frame}} + \displaystyle\sum_{\text{conv}} M^{\text{conv}}_c \, i^{\text{emb}}_c + \displaystyle\sum_{\text{ESS}} X_c \, i^{\text{emb}}_c & a = 0 \\[6pt] r^{\text{fc}}_a \cdot M^{\text{conv}}_{\text{fc}} \cdot i^{\text{emb}}_{\text{fc}} & a > 0 \end{cases}$$
+$$\Gamma^{\text{emb}}_{k,p,y,a} = \mu^{\text{tire}}_k \cdot i^{\text{emb}}_{\text{tire}} \cdot d_{k,p,y,a} \;+\; \begin{cases} \left(M^{\text{frame}}_k + \zeta_k \cdot M^{\text{trailer}}_k\right) i^{\text{emb}}_{\text{frame}} + \displaystyle\sum_{\text{conv}} M^{\text{conv}}_c \, i^{\text{emb}}_c + \displaystyle\sum_{\text{ESS}} X_c \, i^{\text{emb}}_c & a = 0 \\[6pt] r^{\text{fc}}_a \cdot M^{\text{conv}}_{\text{fc}} \cdot i^{\text{emb}}_{\text{fc}} & a > 0 \end{cases}$$
 
-The first sum covers converters and transmissions (factor in kgCO2e/kg); the second covers energy storage components (factor in kgCO2e per unit of capacity).
+$$\mu^{\text{tire}}_k = \frac{M^{\text{tire}}_k + M^{\text{trailer\_tire}}_k}{D^{\text{ref}}_k}, \qquad D^{\text{ref}}_k = \sum_{a} d^{\text{tgt}}_{k,a}$$
+
+The case-split term is the frame and, for sleeper/day\_cab only (the vehicle types that carry a trailer; straight trucks have $\zeta_k = M^{\text{trailer}}_k = 0$), the trailer, scaled by $\zeta_k$ trailers per truck over the vehicle's life, plus the fuel-cell stack — both one-time or actual-replacement-age events, attributed exactly where they occur.
+
+The tire term is different in kind, and applies at *every* age rather than switching on $a$. $M^{\text{tire}}_k$/$M^{\text{trailer\_tire}}_k$ are lifetime tire-*replacement* masses (kg of rubber and steel replaced over the truck's life, from GREET's replacement schedule) for the truck's own tires and, where present, the trailer's; since both draw on the same tire embodied-emissions factor $i^{\text{emb}}_{\text{tire}}$, they are simply summed before being converted to a rate — tire wear is driven by cumulative distance travelled, not by which axle or how many physical trailer units carried that distance, so there is no need to track them separately once mass becomes a rate (this is also why $M^{\text{trailer\_tire}}_k$ is *not* scaled by $\zeta_k$ the way the trailer's structural mass is: GREET's replacement schedule already covers the full truck life regardless of trailer cycling). $D^{\text{ref}}_k$, the *undiscounted* sum of target annual distance $d^{\text{tgt}}_{k,a}$ (Section 3.4) over all ages, is the same reference lifetime distance GREET's schedule implicitly assumed; dividing by it converts the combined lifetime mass into $\mu^{\text{tire}}_k$, a single mass-per-km rate applied every age to the cohort's own *actual* annual distance $d_{k,p,y,a}$ rather than lumped at age 0. A cohort that drives close to $d^{\text{tgt}}_{k,a}$ every year (diesel is never range-bound) accrues essentially the same lifetime tire-replacement total as a flat lump sum would give; a range-limited cohort that falls short of target in some years (small battery/H2 capacity, e.g. early-tech BE/FC — Section 3.4) accrues proportionally less, which a flat lump charged equally to every powertrain could not capture. Because it is spread across every age rather than concentrated at age 0, the tire term is also naturally discounted by fleet-level survival when aggregated (Section 4.2), the same way fuel-cell-stack replacements already are — unlike the case-split term's age-0 lump, which every vehicle sold is charged in full regardless of how long it survives (a one-time manufacturing event, not a replacement schedule, so this is intentional). The tire term does not double-count the tires already embedded in $M^{\text{frame}}_k$/$M^{\text{trailer}}_k$'s one-time material composition (Section 3.1) or enter $M^{\text{unladen}}_{k,p}$.
+
+The converter/transmission sum covers those components (factor in kgCO2e/kg); the ESS sum covers energy storage components (factor in kgCO2e per unit of capacity).
 
 **Supply-chain and tailpipe emissions** (annual, per vehicle):
 

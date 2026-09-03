@@ -34,7 +34,6 @@ To do:
  - Variance in use (logit change like NREL).
  - Hotel load for sleepers and fridge units?
  - Make scrappage/usage decisions for vehicles?
- - PHEs and DHICE to refuel using diesel only if they run out en route and there isn't a break.
 
  Checked up to:
   - _calculate_fuel_consumption
@@ -317,6 +316,10 @@ class Vehicles:
                 self.fuel_consumption['diesel'][mask]     = he_raw
             self._phe_cd_fc = self.fuel_consumption[battery_fuel].copy()
             self._phe_cs_fc = self.fuel_consumption['diesel'].copy()
+            self._schemes = [
+                {battery_fuel: self._phe_cd_fc},
+                {'diesel':     self._phe_cs_fc},
+            ]
             return
 
         surrogate = SURROGATE_NAME.get(self.p, self.p)
@@ -350,6 +353,20 @@ class Vehicles:
             eff = float(self.fuels[f].get('refuel_efficiency', 1.0))
             if eff < 1.0:
                 self.fuel_consumption[f] = self.fuel_consumption[f] / eff
+
+        if self.p == 'dhice':
+            fp     = self.params['fuels']
+            d_prop = fp.get('diesel', {}).get('proportion', 0.75)
+            h_prop = fp.get('h2',     {}).get('proportion', 0.25)
+            # Diesel-only rate the DICE surrogate implies if 100% of dual-mode energy came
+            # from diesel -- inverts the proportion split applied in _split_surrogate_output.
+            diesel_only_fc = self.fuel_consumption['diesel'] / (d_prop / (d_prop + h_prop))
+            self._schemes = [
+                {'diesel': self.fuel_consumption['diesel'], 'h2': self.fuel_consumption['h2']},
+                {'diesel': diesel_only_fc},
+            ]
+        else:
+            self._schemes = [self.fuel_consumption]
 
     def _split_surrogate_output(self, raw_val):
         """
@@ -402,20 +419,28 @@ class Vehicles:
     
     def _calculate_range(self):
         """
-        Compute per-age range (km) as the binding energy-storage constraint across all ESS
-        components, and set self.refuel_rate for use in the daily-distance loop.
+        Build the static per-ESS-component lookup table (usable capacity, refuelling rate/
+        efficiency, degradation coefficients) used by _drive_schemes() -- called from
+        _calculate_annual_distance -- to compute range and daily distance.
 
-        Range per ESS = capacity x usable_fraction / fc_tank  [km]
-        where fc_tank = fuel_consumption (source units/km) x refuel_efficiency converts back
-        to tank/battery units (kWh, kg, L) so that capacity and FC are in commensurable units.
-        refuel_efficiency is only relevant to charging losses, not to how far the stored
-        energy propels the vehicle.  The binding range is the minimum across all ESS.
+        Capacity, refuel rate/efficiency and degradation coefficients don't vary by vehicle
+        age in the current parameter set -- only the fuel-consumption rate that turns a
+        component's capacity into a range does, and that rate varies per driving scheme (a
+        vehicle can have more than one, e.g. PHE's electric/diesel or DHICE's dual-fuel/
+        diesel-only -- see self._schemes, built in _calculate_fuel_consumption). So the range/
+        depletion arithmetic itself lives in _drive_schemes(), called once per age from
+        _calculate_annual_distance; this method only resolves the physical constants.
 
-        self.refuel_rate and self._binding_fuel belong to the ESS that set the minimum range
-        (the constraining tank/battery), so they are always paired with the correct FC in the
-        time-budget formula in _calculate_annual_distance.
-        For H2 tanks: pump flow rate (kg/hr).
-        For batteries: fast-charger wall power x fast_eff = kW delivered to battery.
+        'capacity' here is already usable capacity (capacity x usable_capacity), the tank/
+        battery quantity that actually propels the vehicle. 'raw_capacity' (nameplate,
+        without the usable fraction) is kept separately for the battery cycle-counting
+        formula in _calculate_annual_distance, which normalises against total rated capacity
+        rather than usable capacity.
+
+        For H2/diesel tanks, refuel_rate is pump/nozzle flow (kg/hr or L/hr). For batteries,
+        refuel_rate is fast-charger wall power x fast-charging efficiency (kW delivered to
+        the battery during an en-route top-up) -- independent of the vehicle's normal (depot)
+        charging efficiency, which is refuel_eff.
         """
         battery_fuel = next((f for f in self.fuels if 'charge' in f), None)
         ESS_FUEL = {
@@ -424,173 +449,161 @@ class Vehicles:
             'h2_350bar':   'h2',
             'battery':     battery_fuel,
         }
-        self.range         = np.full(len(self.age), 1e6)
-        self.refuel_rate   = 0.0
-        self._binding_fuel = next(iter(self.fuel_consumption), None)
-
+        self._ess_info = {}
         for comp_name, comp in self.params['components'].items():
             if comp['type'] != 'ess':
                 continue
             f = ESS_FUEL.get(comp_name)
-            if f is None or f not in self.fuel_consumption:
+            if f is None or f not in self.fuels:
                 continue
-            fc = self.fuel_consumption[f].copy()
-            if np.all(fc == 0):
-                continue
-            fc[fc == 0] = 1e-9
             refuel_eff = float(self.fuels[f].get('refuel_efficiency', 1.0))
-            r = float(comp['capacity']) * float(comp['usable_capacity']) / (fc * refuel_eff)
-            prev = self.range.copy()
-            self.range = np.minimum(self.range, r)
             if comp_name == 'battery':
-                rate_raw = float(comp['refuel_rate'])
-                if rate_raw > 0 and battery_fuel:
-                    fast_eff = float(self._all_fuels['fast_charge']['refuel_efficiency'])
-                    rate = rate_raw * fast_eff   # kW delivered to battery
-                else:
-                    rate = 0.0
+                fast_eff = float(self._all_fuels['fast_charge']['refuel_efficiency'])
+                rate = float(comp['refuel_rate']) * fast_eff   # kW delivered to battery
             else:
                 rate = float(comp['refuel_rate'])
-            if np.any(self.range < prev):
-                self.refuel_rate   = rate
-                self._binding_fuel = f
+            self._ess_info[comp_name] = {
+                'fuel':          f,
+                'capacity':      float(comp['capacity']) * float(comp['usable_capacity']),
+                'raw_capacity':  float(comp['capacity']),
+                'refuel_eff':    refuel_eff,
+                'refuel_rate':   rate,
+                'deg_per_year':  float(comp.get('deg_per_year', 0.0)),
+                'deg_per_cycle': float(comp.get('deg_per_cycle', 0.0)),
+            }
+        self._fuel_ess = {info['fuel']: comp for comp, info in self._ess_info.items()}
+
+    def _drive_schemes(self, a, cap, target, allow_extension):
+        """
+        Walk self._schemes in order for vehicle-age a, depleting shared ESS capacity `cap`
+        (dict comp_name -> remaining usable capacity, mutated in place) until `target` km is
+        driven or schemes run out.
+
+        Only the LAST scheme may extend past its own base range via a refuelling/recharging
+        stop, using the same time-budget formula every single-scheme powertrain already used
+        before this method existed. Earlier schemes stop exactly at their own base range and
+        hand off to the next scheme, matching how a vehicle actually switches driving mode
+        (e.g. PHE going charge-depleting -> charge-sustaining) rather than stopping mid-mode
+        to top up. A component shared across schemes (e.g. DHICE's diesel tank, drawn on by
+        both the dual-fuel and diesel-only schemes) is correctly depleted by an earlier scheme
+        before a later scheme computes its own available range against what's actually left.
+
+        Returns (distance driven [km], {fuel: quantity consumed [source units]}, extra
+        distance achieved via a refuelling stop on the last scheme [km]).
+        """
+        fuel_used, driven, achievable, remaining = {}, 0.0, 0.0, target
+        n = len(self._schemes)
+        for i, scheme in enumerate(self._schemes):
+            if remaining <= 0:
+                break
+            base_range, binding_comp, binding_fc, binding_eff = 1e6, None, 0.0, 1.0
+            for f, fc_arr in scheme.items():
+                fc = fc_arr[a]
+                if fc <= 0:
+                    continue
+                comp = self._fuel_ess.get(f)
+                if comp is None or comp not in cap:
+                    continue
+                eff = self._ess_info[comp]['refuel_eff']
+                r = cap[comp] / (fc * eff)
+                if r < base_range:
+                    base_range, binding_comp, binding_fc, binding_eff = r, comp, fc, eff
+
+            if not (allow_extension and i == n - 1) or remaining <= base_range:
+                used = min(remaining, base_range)
+            else:
+                achievable = 0.0
+                if binding_comp is not None:
+                    info      = self._ess_info[binding_comp]
+                    time_left = (remaining - base_range) / max(self.average_speed[a], 1.0)
+                    fc_bind   = binding_fc * binding_eff
+                    if info['refuel_rate'] > 0 and fc_bind > 0:
+                        # Time budget formula: (available_time - 0.25h overhead) x achievable rate
+                        achievable = max(0.0,
+                            (time_left - 0.25) * self.average_speed[a] * info['refuel_rate']
+                            / (fc_bind * self.average_speed[a] + info['refuel_rate'])
+                        )
+                used = base_range + achievable
+
+            for f, fc_arr in scheme.items():
+                fc = fc_arr[a]
+                fuel_used[f] = fuel_used.get(f, 0.0) + used * fc
+                comp = self._fuel_ess.get(f)
+                if comp in cap:
+                    cap[comp] = max(0.0, cap[comp] - used * fc * self._ess_info[comp]['refuel_eff'])
+
+            driven    += used
+            remaining -= used
+
+        return driven, fuel_used, achievable
 
     # -- Annual distance -------------------------------------------------------
 
     def _calculate_annual_distance(self):
         """
-        Age-by-age loop: applies battery degradation and range-limited daily distance.
+        Age-by-age loop: applies battery degradation and range-limited daily distance via
+        _drive_schemes(), which walks self._schemes (one entry for single-mode powertrains;
+        two for PHE (electric then diesel) and DHICE (dual-fuel then diesel-only)).
 
         target_distance (km/year) is converted to a daily working-day target:
           daily_target = annual_km / 365 x (7/5)
         i.e., trucks are assumed to work 5 days out of 7, so each working day covers
         more than 1/365 of the annual distance.
 
-        When daily_target <= range, the vehicle drives the full target.  Otherwise it
-        can extend its range with a refuelling/recharging stop using a time-budget formula:
-          achievable = (time_left - 0.25h) x speed x R / (fc x speed + R)
-        where time_left = shortfall / speed (hours that would have been spent driving),
-        0.25h is the fixed stop overhead, and R = self.refuel_rate.  This is derived by
-        solving simultaneously for stop time and extra distance given a fixed time budget.
+        Each age is driven twice through _drive_schemes: once unconstrained (target=infinity,
+        no refuelling-stop extension) to get self.range[a] -- the vehicle's inherent range on
+        a full tank of everything, which for PHE/DHICE is now the combined range across all
+        onboard energy (electric + diesel, or dual-fuel + diesel), not just the first scheme's
+        -- and once against the actual daily target (with the final scheme allowed to extend
+        via a refuelling/recharging stop, same time-budget formula as before) to get the
+        actual distance driven and fuel consumed that day.
 
-        Battery degradation follows a linear capacity-fade model:
-          effective_range[a] = range[a] x max(0, 1 - deg_per_yearxa - deg_per_cyclexcycles)
-        Cycle count accumulates from annual_distance x fuel_consumption / battery_capacity.
+        Battery degradation follows a linear capacity-fade model, applied to the battery's
+        remaining capacity before either walk in a given age:
+          effective_capacity[a] = usable_capacity x max(0, 1 - deg_per_yearxa - deg_per_cyclexcycles)
+        Cycle count accumulates from the battery-fuel annual quantity actually consumed that
+        age, normalised against the battery's raw (nameplate, not usable) capacity.
 
-        self._enroute_distance tracks km driven via en-route fast charging (non-zero only
-        for slow-charge BETs when range < target), used in _calculate_annual_cost to apply
-        fast-charge pricing to that portion of electricity consumption.
+        self._enroute_distance tracks km driven via a refuelling/recharging stop on the last
+        scheme (non-zero only when that scheme's base range falls short of the remaining daily
+        target), used in _calculate_annual_cost to apply fast-charge pricing to that portion of
+        electricity consumption when the last scheme is battery-electric.
 
         Annual distance is converted back from working-day to calendar-year basis:
           annual_km = daily_km x (5/7) x 365
         """
         daily_target = self.params['target_distance'] / 365.0 * 7.0 / 5.0
 
-        battery_comp       = self.params['components'].get('battery')
-        battery_fuel       = next((f for f in self.fuels if 'charge' in f), None) if battery_comp else None
-        battery_cap        = float(battery_comp['capacity'])      if battery_comp else 0.0
-        deg_per_year       = float(battery_comp['deg_per_year'])  if battery_comp else 0.0
-        deg_per_cycle      = float(battery_comp['deg_per_cycle']) if battery_comp else 0.0
-        battery_refuel_eff = float(self.fuels[battery_fuel]['refuel_efficiency']) if battery_fuel else 1.0
+        battery_info  = self._ess_info.get('battery', {})
+        battery_fuel  = battery_info.get('fuel')
+        battery_cap   = battery_info.get('capacity', 0.0)
+        raw_cap       = battery_info.get('raw_capacity', 0.0)
+        deg_per_year  = battery_info.get('deg_per_year', 0.0)
+        deg_per_cycle = battery_info.get('deg_per_cycle', 0.0)
+        battery_eff   = battery_info.get('refuel_eff', 1.0)
+        has_battery   = bool(battery_fuel) and battery_fuel in self.fuel_consumption
 
-        binding_refuel_eff = float(self.fuels[self._binding_fuel].get('refuel_efficiency', 1.0)) \
-                             if self._binding_fuel else 1.0
-
-        range_ = self.range.copy()
-        self.annual_distance   = np.zeros(len(self.age))
-        self._enroute_distance = np.zeros(len(self.age))
+        self.range              = np.zeros(len(self.age))
+        self.annual_distance    = np.zeros(len(self.age))
+        self._enroute_distance  = np.zeros(len(self.age))
+        self.annual_fuel        = {f: np.zeros(len(self.age)) for f in self.fuel_consumption}
         cycles = 0.0
 
-        if self.p == 'phe':
-            electric_range   = self.range.copy()
-            self.annual_fuel = {battery_fuel: np.zeros(len(self.age)),
-                                'diesel':     np.zeros(len(self.age))}
-            self._enroute_distance = np.zeros(len(self.age))
-            cycles = 0.0
-            for a in self.age:
-                if battery_cap > 0 and self._phe_cd_fc[a] > 0:
-                    elec_r = electric_range[a] * max(0.0, 1.0 - deg_per_year * a - deg_per_cycle * cycles)
-                else:
-                    elec_r = 0.0
-                cd_daily = min(daily_target[a], elec_r)
-                cs_daily = max(0.0, daily_target[a] - cd_daily)
-                self.annual_distance[a]        = daily_target[a] * 5.0 / 7.0 * 365.0
-                annual_cd                      = cd_daily * 5.0 / 7.0 * 365.0
-                annual_cs                      = cs_daily * 5.0 / 7.0 * 365.0
-                self.annual_fuel[battery_fuel][a] = annual_cd * self._phe_cd_fc[a]
-                self.annual_fuel['diesel'][a]     = annual_cs * self._phe_cs_fc[a]
-                if battery_cap > 0 and self._phe_cd_fc[a] > 0:
-                    cycles += annual_cd * self._phe_cd_fc[a] * battery_refuel_eff / battery_cap
-            self.range = electric_range
-            return
-
-        if self.p == 'dhice':
-            # Dual-fuel mode (75% diesel / 25% H2, concurrent) is driven until the 20 kg H2
-            # tank runs dry -- self.range already equals this point, since _calculate_range's
-            # min() over the two ESS collapses to the H2 tank's range (it binds tighter than
-            # the 500 L diesel tank at this split). The remainder of the day is driven
-            # diesel-only, at what the DICE surrogate would consume if 100% of that energy
-            # came from diesel -- recovered by scaling the existing dual-mode diesel rate back
-            # up by (d_prop+h_prop)/d_prop, since it was scaled down by d_prop/(d_prop+h_prop)
-            # in _split_surrogate_output. No degradation term: combustion tanks don't fade with
-            # age the way batteries do. As with PHE, the diesel-only tail is left uncapped
-            # (no mid-route-refuel-stop mechanic) since the diesel tank is large enough that
-            # this never binds in practice -- deliberately not modelled for now (2026-08).
-            dual_range = self.range.copy()
-            fp = self.params['fuels']
-            d_prop = fp.get('diesel', {}).get('proportion', 0.75)
-            h_prop = fp.get('h2',     {}).get('proportion', 0.25)
-            diesel_only_fc = self.fuel_consumption['diesel'] / (d_prop / (d_prop + h_prop))
-
-            self.annual_fuel = {'diesel': np.zeros(len(self.age)), 'h2': np.zeros(len(self.age))}
-            for a in self.age:
-                dual_daily   = min(daily_target[a], dual_range[a])
-                diesel_daily = max(0.0, daily_target[a] - dual_daily)
-                self.annual_distance[a]   = daily_target[a] * 5.0 / 7.0 * 365.0
-                annual_dual        = dual_daily   * 5.0 / 7.0 * 365.0
-                annual_diesel_only = diesel_daily * 5.0 / 7.0 * 365.0
-                self.annual_fuel['diesel'][a] = annual_dual * self.fuel_consumption['diesel'][a] + annual_diesel_only * diesel_only_fc[a]
-                self.annual_fuel['h2'][a]     = annual_dual * self.fuel_consumption['h2'][a]
-            self.range = dual_range
-            return
-
         for a in self.age:
-            # Battery range degradation (1% per year of age + 0.002% per charge cycle)
-            if (battery_fuel and battery_fuel in self.fuel_consumption
-                    and self.fuel_consumption[battery_fuel][a] > 0):
-                range_[a] = self.range[a] * max(0.0, 1.0 - deg_per_year * a - deg_per_cycle * cycles)
+            cap = {name: info['capacity'] for name, info in self._ess_info.items()}
+            if 'battery' in cap and battery_cap > 0 and has_battery and self.fuel_consumption[battery_fuel][a] > 0:
+                cap['battery'] = battery_cap * max(0.0, 1.0 - deg_per_year * a - deg_per_cycle * cycles)
 
-            if daily_target[a] <= range_[a]:
-                daily      = daily_target[a]
-                achievable = 0.0
-            else:
-                # Estimate extra distance achievable during a refuelling/recharging stop
-                shortfall = daily_target[a] - range_[a]
-                time_left = shortfall / max(self.average_speed[a], 1.0)
-                fc_a = self.fuel_consumption[self._binding_fuel][a] * binding_refuel_eff
-                if self.refuel_rate > 0 and fc_a > 0:
-                    # Time budget formula: (available_time - 0.25h overhead) x achievable rate
-                    achievable = max(0.0,
-                        (time_left - 0.25) * self.average_speed[a]
-                        * self.refuel_rate / (fc_a * self.average_speed[a] + self.refuel_rate)
-                    )
-                else:
-                    achievable = 0.0
-                daily = range_[a] + achievable
+            self.range[a], _, _ = self._drive_schemes(a, dict(cap), math.inf, False)
 
-            self.annual_distance[a]   = daily      * 5.0 / 7.0 * 365.0
+            driven, fuel_today, achievable = self._drive_schemes(a, dict(cap), daily_target[a], True)
+            self.annual_distance[a]   = driven * 5.0 / 7.0 * 365.0
             self._enroute_distance[a] = achievable * 5.0 / 7.0 * 365.0
+            for f in self.annual_fuel:
+                self.annual_fuel[f][a] = fuel_today.get(f, 0.0) * 5.0 / 7.0 * 365.0
 
-            if (battery_fuel and battery_cap > 0
-                    and self.fuel_consumption[battery_fuel][a] > 0):
-                cycles += (self.annual_distance[a]
-                           * self.fuel_consumption[battery_fuel][a] * battery_refuel_eff / battery_cap)
-
-        self.range = range_  # save degraded-by-age range back to attribute
-        self.annual_fuel = {
-            f: self.annual_distance * self.fuel_consumption[f]
-            for f in self.fuel_consumption
-        }
+            if has_battery and raw_cap > 0 and self.fuel_consumption[battery_fuel][a] > 0:
+                cycles += self.annual_fuel[battery_fuel][a] * battery_eff / raw_cap
 
         # Split slow_charge into depot (slow) + en-route (fast) portions so that
         # fuel_usage and emissions reflect which charger type delivered the energy.
@@ -640,24 +653,38 @@ class Vehicles:
                           multiplied by trailers_per_truck for lifetime replacements. Both are
                           shared across vehicle types like every other component; only the
                           mass (frame_mass/trailer_mass) is vehicle-type-specific.
-                          tire/trailer_tire use the 'tire' component's embodied_emissions,
-                          lump-summed at age 0 like frame/trailer (no age-distribution): their
-                          'mass' is each vehicle type's *lifetime* tire-replacement mass, not an
-                          instantaneous physical mass, so unlike frame/trailer they are NOT added
-                          to Vehicles.mass/unloaded_mass in _calculate_mass. Unlike the trailer's
-                          own structural mass, trailer_tire is NOT multiplied by trailers_per_truck:
-                          tire wear is driven by cumulative distance travelled, not by how many
-                          physical trailer units carried that distance, so GREET's replacement
-                          schedule (calibrated over one reference truck lifetime) already covers
-                          the full truck life regardless of how many trailers cycle through it.
+                          tire/trailer_tire use the 'tire' component's embodied_emissions, but unlike
+                          frame/trailer/ESS/converter/transmission they are NOT lumped at age 0:
+                          their 'mass' fields are each vehicle type's *lifetime* tire-replacement
+                          mass (from GREET's own replacement schedule) for the truck's own tires
+                          and, if present, the trailer's. Because both draw on the same 'tire'
+                          embodied_emissions factor, their masses are simply summed and converted
+                          together into one combined per-km rate, self.tire_rate = (tire_mass +
+                          trailer_tire_mass) / D_ref (kg replacement-mass per km) -- tire wear is
+                          driven by cumulative distance travelled, not by which axle or how many
+                          physical trailer units carried that distance, so there is no need to
+                          track truck and trailer tires separately once mass is converted to a
+                          rate. D_ref = sum(target_distance) over the full MAX_AGE profile is the
+                          same undiscounted reference lifetime distance GREET's schedule
+                          implicitly assumed, so a diesel cohort (whose annual_distance tracks
+                          target_distance closely -- diesel is never range-bound) reproduces
+                          essentially the same lifetime total as the old lump sum, while a
+                          range-limited cohort that drives less than target in some years accrues
+                          proportionally less. Because it is not an instantaneous physical mass,
+                          tire/trailer_tire is (like before) NOT added to Vehicles.mass/
+                          unloaded_mass in _calculate_mass.
                           Converter/transmission components use their own embodied_emissions
                           field (same distribution, falls back to shared factor if absent).
                           ESS components use a dedicated kgCO2e/unit-capacity field.
                           All embodied_emissions distributions share one MC cp ("embodied"
                           group in data.json) -- high/low manufacturing decarbonisation moves
                           all factors together.
-                          Survival is handled by _aggregate (n = surviving vehicle count),
-                          so replacement emissions at late ages scale down automatically.
+                          Survival is handled by _aggregate (n = surviving vehicle count): FC
+                          stack replacements and tire/trailer_tire (both genuine per-age arrays)
+                          scale down correctly at late ages; only the frame/trailer/ESS/
+                          converter/transmission age-0 lump is charged in full to every vehicle
+                          sold regardless of how long it survives (a one-time manufacturing
+                          event, not a replacement schedule, so this is intentional).
           emissions_supply -- upstream (well-to-tank) emissions per year (kgCO2e/yr).
           emissions_use    -- tailpipe (tank-to-wheel) emissions per year (kgCO2e/yr).
                              Zero for ZEVs (no combustion at point of use).
@@ -673,13 +700,6 @@ class Vehicles:
             embodied_total += (
                 float(trailer_comp['mass']) * float(p.get('trailers_per_truck', 0)) * trailer_emb
             )
-        tire_comp = p['components'].get('tire')
-        if tire_comp is not None:
-            embodied_total += float(tire_comp['mass']) * float(tire_comp.get('embodied_emissions', emb))
-        trailer_tire_comp = p['components'].get('trailer_tire')
-        if trailer_tire_comp is not None:
-            tt_emb = float(trailer_tire_comp.get('embodied_emissions', emb))
-            embodied_total += float(trailer_tire_comp['mass']) * tt_emb
         for _, comp in p['components'].items():
             if comp['type'] == 'ess' and 'embodied_emissions' in comp:
                 embodied_total += float(comp['capacity']) * float(comp['embodied_emissions'])
@@ -693,6 +713,24 @@ class Vehicles:
         if fc_comp is not None and np.any(self.fc_replacements > 0):
             comp_emb = float(fc_comp.get('embodied_emissions', emb))
             self.embodied = self.embodied + self.fc_replacements * float(fc_comp['mass']) * comp_emb
+
+        # Tire + trailer_tire embodied emissions: distance-driven, not a lump sum. Both use the
+        # same 'tire' component's embodied_emissions factor, so their lifetime-replacement masses
+        # are summed first into one combined mass, then divided once by D_ref (the undiscounted
+        # lifetime reference distance GREET's replacement schedule implicitly assumed) to give a
+        # single per-km rate, self.tire_rate (kg replacement-mass per km), applied to actual
+        # annual_distance. Survival (via _aggregate) discounts this the same way it already does
+        # for fc_replacements above. self.tire_rate is exposed for reuse by plots/vehicle_plots.py.
+        tire_comp = p['components'].get('tire')
+        self.tire_rate = 0.0
+        if tire_comp is not None:
+            tire_mass = float(tire_comp['mass'])
+            trailer_tire_comp = p['components'].get('trailer_tire')
+            if trailer_tire_comp is not None:
+                tire_mass += float(trailer_tire_comp['mass'])
+            self.tire_rate = tire_mass / float(np.sum(p['target_distance']))
+            tire_emb = float(tire_comp.get('embodied_emissions', emb))
+            self.embodied = self.embodied + self.tire_rate * tire_emb * self.annual_distance
 
         self.emissions_supply = np.zeros(len(self.age))
         self.emissions_use    = np.zeros(len(self.age))

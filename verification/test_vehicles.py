@@ -195,11 +195,71 @@ def test_non_fc_powertrains_have_no_replacements(fleet):
 def test_embodied_nonnegative_and_positive_at_purchase(vehicles):
     """
     Manufacturing emissions must be positive at age 0 and non-negative at all ages.
-    Ages > 0 may be nonzero once FC stack replacement embodied emissions are added.
+    Ages > 0 may be nonzero: FC stack replacement embodied emissions at their actual
+    replacement ages, and tire embodied emissions at every age (a per-km rate, combining
+    truck + trailer tire mass, applied to annual_distance).
     """
     for (k, p), v in vehicles.items():
         assert v.embodied[0] > 0, f"embodied[0] == 0: k={k}, p={p}"
         assert np.all(v.embodied >= 0), f"embodied < 0 at some age: k={k}, p={p}"
+
+
+def test_diesel_tire_embodied_matches_lump_sum(fleet):
+    """
+    Diesel cohorts drive ~target_distance every year (see
+    test_annual_distance_does_not_exceed_target), so the new per-km tire rate (v.tire_rate,
+    combining truck + trailer tire mass, applied to annual_distance) should reproduce
+    essentially the same lifetime total as the old age-0 lump sum: tire_mass * embodied_emissions
+    [+ trailer_tire_mass * embodied_emissions]. A few percent tolerance accounts for
+    annual_distance's small (<=1%) shortfall vs target_distance.
+    """
+    for k in fleet.K:
+        v = fleet.vehicles[k, 'dice', START_YEAR]
+        p = v.params
+        tire = p['components'].get('tire')
+        if tire is None:
+            continue
+        frame_emb = float(p['components']['frame']['embodied_emissions'])
+        tire_emb = float(tire.get('embodied_emissions', frame_emb))
+        expected = float(tire['mass']) * tire_emb
+        trailer_tire = p['components'].get('trailer_tire')
+        if trailer_tire is not None:
+            expected += float(trailer_tire['mass']) * tire_emb  # same embodied_emissions factor as tire
+
+        actual = v.tire_rate * tire_emb * float(np.sum(v.annual_distance))
+
+        assert actual == pytest.approx(expected, rel=0.03), \
+            f"diesel tire embodied total diverges from old lump sum: k={k}, actual={actual}, expected={expected}"
+
+
+def test_range_limited_zev_has_lower_tire_embodied_than_diesel(fleet):
+    """
+    A cohort that drives less than target_distance in some years (range-limited ZEV) should
+    accrue strictly less total tire embodied emissions than diesel for the same vehicle type k,
+    since fewer km driven means fewer tire replacements under the new per-km treatment --
+    unlike the old lump sum, which charged every powertrain the same total regardless of how
+    far it actually drove.
+    """
+    def tire_embodied_total(v):
+        p = v.params
+        tire = p['components'].get('tire')
+        if tire is None:
+            return 0.0
+        frame_emb = float(p['components']['frame']['embodied_emissions'])
+        tire_emb = float(tire.get('embodied_emissions', frame_emb))
+        return v.tire_rate * tire_emb * float(np.sum(v.annual_distance))
+
+    found_range_limited = False
+    for k in fleet.K:
+        diesel = fleet.vehicles[k, 'dice', START_YEAR]
+        for p in fleet.P[k]:
+            v = fleet.vehicles[k, p, START_YEAR]
+            target = np.asarray(v.params['target_distance'])
+            if np.any(v.annual_distance < target * 0.99):
+                found_range_limited = True
+                assert tire_embodied_total(v) < tire_embodied_total(diesel), \
+                    f"range-limited {p} tire embodied not lower than diesel: k={k}"
+    assert found_range_limited, "no range-limited cohort found at START_YEAR (median params) -- test is vacuous"
 
 
 def test_zev_has_zero_tailpipe_emissions(fleet):

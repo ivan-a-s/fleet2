@@ -193,11 +193,14 @@ def _embodied_components(v):
     """
     Per-component lifetime embodied emissions (kgCO2e) for one Vehicles cohort.
     Mirrors model.py Vehicles._calculate_emissions -- keep in sync if that logic changes.
-    frame/trailer/tire/trailer_tire are lump sums at age 0 (per the model's own treatment);
-    the fuel-cell stack's replacement emissions are the only age>0 contribution, so they're
-    survival-weighted here to match how supply/use emissions are aggregated below.
+    frame/trailer are lump sums at age 0 (per the model's own treatment). 'tire' is a single
+    per-km rate (v.tire_rate, combining truck + trailer tire mass) applied to each age's actual
+    annual_distance -- like the fuel-cell stack's replacement emissions, it contributes at every
+    age, so both are survival-weighted here (sum(per_age_value * survival_rate)) into a single
+    lifetime total per component, matching how supply/use emissions are aggregated below.
     """
     p = v.params
+    surv = np.asarray(p['survival_rate'])
     frame_emb = float(p['components']['frame']['embodied_emissions'])
     comps = {'frame': float(p['components']['frame']['mass']) * frame_emb}
 
@@ -208,12 +211,10 @@ def _embodied_components(v):
 
     tire = p['components'].get('tire')
     if tire is not None:
-        comps['tire'] = float(tire['mass']) * float(tire.get('embodied_emissions', frame_emb))
-
-    trailer_tire = p['components'].get('trailer_tire')
-    if trailer_tire is not None:
-        tt_emb = float(trailer_tire.get('embodied_emissions', frame_emb))
-        comps['trailer_tire'] = float(trailer_tire['mass']) * tt_emb
+        # v.tire_rate (kg replacement-mass per km) already combines tire + trailer_tire mass --
+        # see model.py Vehicles._calculate_emissions.
+        tire_emb = float(tire.get('embodied_emissions', frame_emb))
+        comps['tire'] = float(np.sum(v.annual_distance * surv)) * v.tire_rate * tire_emb
 
     for name, comp in p['components'].items():
         if name in ('frame', 'trailer', 'tire', 'trailer_tire'):
@@ -225,7 +226,6 @@ def _embodied_components(v):
 
     fc_comp = p['components'].get('fc')
     if fc_comp is not None and np.any(v.fc_replacements > 0):
-        surv     = np.asarray(p['survival_rate'])
         comp_emb = float(fc_comp.get('embodied_emissions', frame_emb))
         comps['fc_replacements'] = float(np.sum(v.fc_replacements * surv)) * float(fc_comp['mass']) * comp_emb
 

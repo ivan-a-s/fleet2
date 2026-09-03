@@ -123,7 +123,7 @@ Module constants:   _SURROGATES (loaded from vehicle_modelling/surrogates.json),
                     _YEAR0 (= START_YEAR - MAX_AGE, first year in all realised arrays)
 
 Vehicles class:     _calculate_mass, _calculate_fuel_consumption,
-                    _split_surrogate_output, _calculate_range,
+                    _split_surrogate_output, _calculate_range, _drive_schemes,
                     _calculate_annual_distance, _track_fc_replacements,
                     _calculate_emissions, _cap_cost, _op_cost_array,
                     _calculate_capital_cost, _calculate_annual_cost,
@@ -147,6 +147,61 @@ Module functions:   _market_share_limit (production cap helper, unchanged),
                     -- see "Performance" below),
                     _shadow_price_shares (shadow-price solver -- see below)
 ```
+
+## Range / annual distance architecture (`Vehicles._calculate_range`, `_drive_schemes`, `_calculate_annual_distance`)
+
+**Status: done and verified (snapshot check passes 2236/2236 within 0.01%; stress-tested by
+artificially shrinking the diesel tank -- see below).**
+
+Every powertrain drives through an ordered sequence of `self._schemes` -- a scheme is a
+`{fuel: fc_array}` dict, one entry per driving mode. `self._schemes` has length 1 for dice, he,
+be, fc, hice (`[self.fuel_consumption]`, unchanged from before this existed) and length 2 for the
+two multi-mode powertrains: PHE (`[{battery_fuel: cd_fc}, {'diesel': cs_fc}]`, electric then
+diesel) and DHICE (`[{'diesel': dual_diesel_fc, 'h2': dual_h2_fc}, {'diesel': diesel_only_fc}]`,
+dual-fuel then diesel-only). It's built once per `Vehicles` instance at the end of
+`_calculate_fuel_consumption`, right next to the surrogate-physics code that already had to
+distinguish these cases (PHE evaluates two separate BEV/HEV surrogates; DHICE splits one
+DICE-surrogate output by declared proportion) -- that physics can't be generalised away, but
+everything downstream of it now can be.
+
+This replaced three separate code paths (a generic single-fuel one, plus a fully hand-written PHE
+branch and DHICE branch, each duplicating the "drive scheme A until its energy is exhausted, then
+switch to scheme B" logic) with one: `_calculate_range` now only resolves static per-ESS-component
+constants (`self._ess_info`: usable capacity, refuel rate/efficiency, degradation coefficients --
+none of which vary by vehicle age in the current parameter set) and a fuel->component reverse map
+(`self._fuel_ess`). `_drive_schemes(a, cap, target, allow_extension)` is the actual generic engine:
+given a `cap` dict of remaining usable capacity per ESS component (mutated in place), it walks
+`self._schemes` in order, using each scheme's own base range (the binding component within that
+scheme, given whatever capacity is left in it) until `target` km is driven or schemes run out. Only
+the **last** scheme may extend past its base range via the pre-existing time-budget
+refuelling/recharging-stop formula (`achievable = (time_left - 0.25h) x speed x r / (fc x speed +
+r)`); earlier schemes simply hand off once exhausted, matching how a vehicle actually switches mode
+rather than stopping mid-mode to top up. A component shared across schemes (DHICE's diesel tank,
+drawn on by both the dual-fuel and diesel-only schemes) is correctly depleted by the earlier scheme
+before the later one computes its own available range against what's actually left -- this is the
+one structural gap the refactor closed: the diesel-only/CS tail previously had **no range check at
+all** (implicitly infinite), so it could never trigger the same refuelling-stop extension every
+other powertrain already had. `_calculate_annual_distance` calls `_drive_schemes` twice per age --
+once with `target=math.inf, allow_extension=False` to get `self.range[a]` (now genuinely the
+**combined** range across all onboard energy for PHE/DHICE, not just the first scheme's -- a
+visible change in `vehicle_plots.py`'s diagnostic range panel, confirmed to feed no Fleet-level
+output), once against the real daily target to get actual `annual_distance`/`annual_fuel`.
+
+**Why this doesn't change any existing output despite the new capability:** traced by hand and
+confirmed by the snapshot check -- in every realistic parameter draw the diesel tank's own range
+(now finite instead of assumed infinite) is far larger than any shortfall it would ever need to
+cover after the first scheme, so the new cap+extension branch is only ever hit in the sense that it
+still resolves to the old uncapped behaviour (`min(shortfall, huge_number) == shortfall`). Verified
+by artificially shrinking `diesel_tank.capacity` to 3 L in a throwaway script (not `params.py`) for
+both PHE and DHICE: the extension formula activates, produces finite non-negative
+`annual_distance`/`annual_fuel` (e.g. DHICE's combined range collapses to ~12 km and leans almost
+entirely on the refuelling-stop extension to still cover most of the daily target), confirming the
+safeguard works when it matters even though it's numerically inert at real parameter values.
+
+`self._binding_fuel` and `self.refuel_rate` (formerly persistent per-vehicle scalars set by
+`_calculate_range`, describing whichever single ESS component was found binding) no longer exist --
+superseded by `_ess_info` plus the per-call, per-age `binding_comp` local to `_drive_schemes`.
+Grepped the whole repo before removing them; nothing outside the two rewritten methods read either.
 
 ## Market-share allocation architecture (`Fleet._calculate_market_share`, `_shadow_price_shares`)
 
